@@ -206,7 +206,7 @@ function normalizeStore(input: Partial<Store> | null | undefined): Store {
   let inferredRank: RankState
   if (Number.isInteger(input?.currentRankTier) && Number(input?.currentRankTier) >= MIN_RANK && Number(input?.currentRankTier) <= MAX_RANK
     && Number.isInteger(input?.currentRankPoints) && Number(input?.currentRankPoints) >= 0 && Number(input?.currentRankPoints) <= MAX_RANK_POINTS) {
-    inferredRank = normalizeRankState(Number(input.currentRankTier), Number(input.currentRankPoints))
+    inferredRank = normalizeRankState(Number(input?.currentRankTier), Number(input?.currentRankPoints))
   } else {
     const latestSnapshot = [...chronological].reverse().find(match => typeof match.rankPoints === 'number')
     let legacyTotal: number | null = null
