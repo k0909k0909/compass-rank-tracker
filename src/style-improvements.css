@@ -1,0 +1,73 @@
+/* 追加機能：ヒーロー検索・ロール・お気に入りの操作 */
+.hero-picker-controls {
+  display: grid;
+  grid-template-columns: minmax(190px, .85fr) minmax(0, 1.25fr);
+  align-items: start;
+  gap: 14px;
+  max-width: 760px;
+}
+.hero-search-control,
+.hero-filter-control { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.hero-picker-controls .search-field { min-width: 0; width: 100%; }
+.hero-role-buttons { display: flex; flex-wrap: wrap; gap: 5px; }
+.role-filter-button {
+  border: 1px solid #303951;
+  border-radius: 7px;
+  padding: 7px 9px;
+  background: #0e1526;
+  color: #9aa5c0;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.role-filter-button.active {
+  border-color: #8b7af5;
+  background: #252044;
+  color: #d6ccff;
+}
+.favorite-filter {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  margin-top: 2px;
+  color: #d4d8e8 !important;
+  font-size: 10px !important;
+  cursor: pointer;
+}
+.favorite-filter input { width: 14px !important; height: 14px; margin: 0; accent-color: #f5c451; }
+.favorite-filter span { display: inline-flex; align-items: center; gap: 5px; }
+.favorite-filter svg { color: #f5c451; }
+.hero-select-field { max-width: 640px; }
+.hero-select-row { display: grid; grid-template-columns: minmax(0, 1fr) 42px; gap: 8px; align-items: stretch; }
+.hero-select-row select { min-width: 0; width: 100%; }
+.favorite-toggle {
+  display: grid;
+  place-items: center;
+  min-width: 42px;
+  border: 1px solid #303951;
+  border-radius: 8px;
+  background: #0e1526;
+  color: #828da8;
+}
+.favorite-toggle.is-favorite { border-color: #b99536; background: #332b17; color: #f5c451; }
+.favorite-toggle:disabled { opacity: .45; cursor: not-allowed; }
+.season-check {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px !important;
+  width: fit-content;
+  margin-top: 12px !important;
+  padding: 8px 10px !important;
+  cursor: pointer;
+}
+.season-check span { font-size: 11px !important; font-weight: 700 !important; }
+.season-check.season-disabled { opacity: .42; cursor: not-allowed; }
+.season-check input:disabled { cursor: not-allowed; }
+
+@media (max-width: 700px) {
+  .hero-picker-controls { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .hero-role-buttons { flex-wrap: wrap; }
+  .hero-select-field { max-width: 100%; }
+  .role-filter-button { padding: 7px 8px; }
+}
