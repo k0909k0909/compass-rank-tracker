@@ -1,8 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { createClient, type User } from '@supabase/supabase-js'
-import { Activity, BarChart3, CalendarDays, Download, FileUp, Gauge, History, Minus, Pencil, Plus, Search, Settings, Shield, Star, Swords, Trash2, Trophy, X } from 'lucide-react'
+import { Activity, BarChart3, CalendarDays, Download, FileUp, Gauge, History, Minus, Pencil, Plus, Search, Settings, Shield, Star, Sun, Moon, Swords, Trash2, Trophy, X } from 'lucide-react'
+import compassNoteMark from './assets/compass-note-mark.svg'
 import './style.css'
 import './style-improvements.css'
+import './theme.css'
 
 type Role = 'アタッカー' | 'ガンナー' | 'タンク' | 'スプリンター'
 type Result = 'win' | 'loss' | 'draw'
@@ -600,7 +602,7 @@ function TrackerApp() {
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="brand-mark"><Swords size={23}/></div>
+      <div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div>
       <div className="brand-copy"><strong>コンパス戦績ノート</strong><span>RANK TRACKER</span></div>
       <div className="side-label">MENU</div>
       <nav>
@@ -764,6 +766,20 @@ function readLocalStore(): Store | null {
 }
 
 export default function App() {
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      return localStorage.getItem('compass-rank-tracker-theme-v1') === 'light' ? 'light' : 'dark'
+    } catch { return 'dark' }
+  })
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try { localStorage.setItem('compass-rank-tracker-theme-v1', theme) } catch { /* storage may be unavailable */ }
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#f1f9fb' : '#080c15')
+  }, [theme])
+  const themeToggle = <button type="button" className="theme-toggle" onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}>
+    {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+    <span>{theme === 'dark' ? 'ライトモード' : 'ダークモード'}</span>
+  </button>
   const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
   const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined
   const [user, setUser] = useState<User | null>(null)
@@ -830,8 +846,8 @@ export default function App() {
     else setMessage('ログインしました。クラウドデータを読み込んでいます。')
   }
 
-  if (!supabase) return <div className="auth-shell"><div className="auth-card"><div className="brand-mark"><Swords size={23}/></div><h1>クラウド同期の設定</h1><p>Supabase の接続情報がまだ設定されていません。公開設定後に、このアプリを利用できるようになります。</p><ol><li>Supabase プロジェクトを作成</li><li>SQL Editor で <code>supabase/migrations/001_initial_schema.sql</code> を実行</li><li>プロジェクトの URL と Publishable key をホスティング設定に登録</li></ol><p className="small-note">この設定画面は、接続情報を入力する前の状態です。</p></div></div>
-  if (!user) return <div className="auth-shell"><form className="auth-card" onSubmit={submitAuth}><div className="brand-mark"><Swords size={23}/></div><div className="eyebrow">RANK TRACKER CLOUD</div><h1>コンパス戦績ノート</h1><p>アカウントでログインすると、PC とスマホで記録を共有できます。</p><div className="field"><label>メールアドレス</label><input type="email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} /></div><div className="field"><label>パスワード（6文字以上）</label><input type="password" required minLength={6} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} /></div><button className="primary-button auth-submit" type="submit">{mode === 'login' ? 'ログイン' : 'アカウントを作成'}</button><button className="text-button auth-switch" type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>{mode === 'login' ? '初めて使う方：アカウント作成' : 'すでにアカウントをお持ちの方：ログイン'}</button>{message && <p className="auth-message">{message}</p>}</form></div>
-  if (!ready) return <div className="auth-shell"><div className="auth-card"><div className="brand-mark"><Swords size={23}/></div><h1>クラウドデータを準備中</h1><p>{syncStatus}。しばらくお待ちください。</p>{message && <p className="auth-message">{message}</p>}<button className="secondary-button" onClick={() => supabase.auth.signOut()}>ログアウト</button></div></div>
-  return <CloudContext.Provider value={{ saveCloudStore, syncStatus }}><><div className="cloud-user-bar"><span>{user.email} でログイン中 · 同期：{syncStatus}</span><button onClick={() => supabase.auth.signOut()}>ログアウト</button></div><TrackerApp /></></CloudContext.Provider>
+  if (!supabase) return <div className="auth-shell">{themeToggle}<div className="auth-card"><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><h1>クラウド同期の設定</h1><p>Supabase の接続情報がまだ設定されていません。公開設定後に、このアプリを利用できるようになります。</p><ol><li>Supabase プロジェクトを作成</li><li>SQL Editor で <code>supabase/migrations/001_initial_schema.sql</code> を実行</li><li>プロジェクトの URL と Publishable key をホスティング設定に登録</li></ol><p className="small-note">この設定画面は、接続情報を入力する前の状態です。</p></div></div>
+  if (!user) return <div className="auth-shell">{themeToggle}<form className="auth-card" onSubmit={submitAuth}><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><div className="eyebrow">RANK TRACKER CLOUD</div><h1>コンパス戦績ノート</h1><p>アカウントでログインすると、PC とスマホで記録を共有できます。</p><div className="field"><label>メールアドレス</label><input type="email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} /></div><div className="field"><label>パスワード（6文字以上）</label><input type="password" required minLength={6} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} /></div><button className="primary-button auth-submit" type="submit">{mode === 'login' ? 'ログイン' : 'アカウントを作成'}</button><button className="text-button auth-switch" type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>{mode === 'login' ? '初めて使う方：アカウント作成' : 'すでにアカウントをお持ちの方：ログイン'}</button>{message && <p className="auth-message">{message}</p>}</form></div>
+  if (!ready) return <div className="auth-shell">{themeToggle}<div className="auth-card"><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><h1>クラウドデータを準備中</h1><p>{syncStatus}。しばらくお待ちください。</p>{message && <p className="auth-message">{message}</p>}<button className="secondary-button" onClick={() => supabase.auth.signOut()}>ログアウト</button></div></div>
+  return <CloudContext.Provider value={{ saveCloudStore, syncStatus }}><><div className="cloud-user-bar">{themeToggle}<span className="cloud-login-status">{user.email} でログイン中 · 同期：{syncStatus}</span><button className="logout-button" onClick={() => supabase.auth.signOut()}>ログアウト</button></div><TrackerApp /></></CloudContext.Provider>
 }
