@@ -23,6 +23,11 @@ type Match = {
   rankChange?: number | null
   /** 旧データでは未設定 */
   mode?: Mode
+  /** 新ランク仕様：試合前後のランクを保存。旧記録では未設定 */
+  rankBeforeTier?: number
+  rankBeforePoints?: number
+  rankAfterTier?: number
+  rankAfterPoints?: number
 }
 type Store = {
   matches: Match[]
@@ -30,6 +35,14 @@ type Store = {
   maps: string[]
   initialRankPoints?: number | null
   lastMode?: Mode
+  /** 現在のランク（S1〜S9） */
+  currentRankTier?: number
+  /** 現在のランク内ポイント（0〜499） */
+  currentRankPoints?: number
+  /** リセット操作で確定した現在のシーズン */
+  activeSeason?: string
+  /** YYYY-MM。月ごとの自動リセット重複防止用 */
+  lastSeasonResetMonth?: string
 }
 type Page = 'dashboard' | 'add' | 'history' | 'settings'
 type CloudContextValue = { saveCloudStore: (store: Store) => void; syncStatus: string }
@@ -64,21 +77,29 @@ const heroNamesByRole: Record<Role, string[]> = {
 const roles: Role[] = ['アタッカー', 'ガンナー', 'タンク', 'スプリンター']
 // 標準ヒーローは実装順を優先して選択欄に表示します。
 const heroImplementationOrder = [
-  // オリジナルヒーローの実装順（アタリから）
-  '十文字アタリ', 'ジャスティス ハンコック', 'リリカ', '双挽乃保', '桜華忠臣', 'ジャンヌ ダルク', "マルコス'55", 'ルチアーノ', 'Voidoll',
-  '深川まとい', 'グスタフ ハイドリヒ', 'ニコラ テスラ', 'ヴィオレッタ ノワール', 'コクリコット ブランシュ', 'マリア=S=レオンブルク',
-  'アダム=ユーリエフ', 'サーティーン', 'かけだし勇者', 'メグメグ', 'イスタカ', '輝龍院きらら', 'ポロロッチョ', 'ソーン=ユーリエフ',
-  'デビルミント鬼龍 デルミン', 'トマス', '零夜', 'ルルカ', 'ピエール77世', '狐ヶ咲甘色', 'ニーズヘッグ', 'ゲームバズーカガール',
-  '青春アリス', 'イグニス=ウィル=ウィスプ', '糸廻輪廻', 'Bugdoll', 'ステリア・ララ・シルワ', 'ラヴィ・シュシュマルシュ',
-  'アル・ダハブ＝アルカティア', '天空王 ぶれいずどらごん', '某＜なにがし＞', 'クー・シー', 'アミスター=バランディン', '鬼ヶ式うら', 'コラプス',
-  'みりぽゆ', 'チーちゃん', 'ーペルリニエ', 'メルーニャ・ランチェルナ', 'ファースト', 'シャルル・リヒター', '一姫', 'エドワード・エルリック', 'タココ',
-  // コラボヒーローは参考一覧の実装順
-  'ソル=バッドガイ', 'ディズィー', '初音ミク', 'リュウ', '春麗', 'エミリア', 'レム', 'カイ=キスク', '鏡音リン', '鏡音レン',
-  'ザック＆レイチェル', 'モノクマ', 'アクア', 'めぐみん', 'リヴァイ', '猫宮ひなた', '岡部倫太郎', 'セイバーオルタ', 'ギルガメッシュ',
-  '佐藤四郎兵衛忠信', 'アイズ・ヴァレンシュタイン', 'ノクティス', '中島敦', '芥川龍之介', 'ライザリン・シュタウト', 'ジョーカー',
-  'アインズ・ウール・ゴウン', 'キリト', 'アスナ', 'ラム', '2B', 'リムル=テンペスト', '御坂美琴', 'アクセラレータ', 'ベル・クラネル',
-  'ロキシー・ミグルディア', 'ロックマン.EXE＆光熱斗', 'デンジ', 'パワー', 'シノン', 'ターニャ・デグレチャフ', 'ボンドルド',
-  'ゴン=フリークス', 'キルア=ゾルディック', '上条当麻', 'シャドウ', 'ポプ子＆ピピ美', 'セイバー', 'アーチャー', 'ランサー', 'レゼ'
+  // 2016/12/17 初期ヒーロー
+  '十文字アタリ', 'ジャスティス ハンコック', 'リリカ', '双挽乃保', '桜華忠臣', 'ジャンヌ ダルク', "マルコス'55", 'ルチアーノ', 'Voidoll', '深川まとい',
+  // 2017
+  'ソル=バッドガイ', 'ディズィー', 'グスタフ ハイドリヒ', 'ニコラ テスラ', '初音ミク', 'ヴィオレッタ ノワール', 'コクリコット ブランシュ', 'リュウ', '春麗',
+  'マリア=S=レオンブルク', 'アダム=ユーリエフ', 'サーティーン', 'かけだし勇者', 'エミリア', 'レム',
+  // 2018
+  'カイ=キスク', 'メグメグ', '鏡音リン', '鏡音レン', 'イスタカ', 'ザック＆レイチェル', '輝龍院きらら', 'モノクマ', 'ポロロッチョ', 'アクア', 'めぐみん',
+  // 2019
+  'ソーン=ユーリエフ', 'リヴァイ', 'デビルミント鬼龍 デルミン', 'トマス', '猫宮ひなた', '岡部倫太郎', '零夜', 'セイバーオルタ', 'ギルガメッシュ',
+  // 2020
+  'ルルカ', 'ピエール77世', '佐藤四郎兵衛忠信', 'アイズ・ヴァレンシュタイン', '狐ヶ咲甘色', 'ノクティス', 'ニーズヘッグ',
+  // 2021
+  '中島敦', '芥川龍之介', 'ゲームバズーカガール', 'ライザリン・シュタウト', '青春アリス', 'ジョーカー', 'イグニス=ウィル=ウィスプ', 'アインズ・ウール・ゴウン', '糸廻輪廻', 'キリト', 'アスナ',
+  // 2022
+  'Bugdoll', 'ステリア・ララ・シルワ', 'ラム', '2B', 'ラヴィ・シュシュマルシュ', 'リムル=テンペスト', 'アル・ダハブ＝アルカティア', '御坂美琴', 'アクセラレータ',
+  // 2023
+  '天空王 ぶれいずどらごん', 'ベル・クラネル', 'ロキシー・ミグルディア', '某＜なにがし＞', 'ロックマン.EXE＆光熱斗', 'クー・シー', 'パワー', 'デンジ',
+  // 2024
+  'アミスター=バランディン', 'シノン', 'ターニャ・デグレチャフ', '鬼ヶ式うら', 'コラプス', 'ボンドルド', 'みりぽゆ', 'ゴン=フリークス', 'キルア=ゾルディック',
+  // 2025。オリジナル・コラボを実装時期順に混在させる
+  'チーちゃん', '上条当麻', 'ーペルリニエ', 'シャドウ', 'ポプ子＆ピピ美', 'メルーニャ・ランチェルナ', 'セイバー', 'アーチャー', 'ランサー',
+  // 2026
+  'ファースト', 'レゼ', 'シャルル・リヒター', '一姫', 'エドワード・エルリック', 'タココ'
 ]
 const heroOrderIndex = new Map(heroImplementationOrder.map((name, index) => [name, index]))
 const initialHeroes: Hero[] = Object.entries(heroNamesByRole).flatMap(([role, names]) => names.map(name => ({ name, role: role as Role })))
@@ -108,10 +129,66 @@ const seasonLabelFromDate = (dateTime: string) => {
   const [year, month] = dateTime.slice(0, 7).split('-')
   return year && month ? `${year}年${Number(month)}月シーズン` : ''
 }
+type RankState = { tier: number; points: number }
+const MIN_RANK = 1
+const MAX_RANK = 9
+const MAX_RANK_POINTS = 499
+const MAX_TOTAL_RANK_POINTS = 4499
+const clampInteger = (value: number, min: number, max: number) => Math.max(min, Math.min(max, Math.trunc(Number.isFinite(value) ? value : min)))
+const normalizeRankState = (tier: number, points: number): RankState => ({
+  tier: clampInteger(tier, MIN_RANK, MAX_RANK),
+  points: clampInteger(points, 0, MAX_RANK_POINTS)
+})
+const rankStateToTotal = (state: RankState) => (state.tier - 1) * 500 + state.points
+const rankStateFromLegacyTotal = (total: number): RankState => {
+  const bounded = clampInteger(total, 0, MAX_TOTAL_RANK_POINTS)
+  return { tier: Math.floor(bounded / 500) + 1, points: bounded % 500 }
+}
+const formatRankState = (state: RankState) => `S${state.tier} · ${state.points}pt`
+/** このゲームの仕様：ポイントが残っている間の敗北ではランクを下げず、0で止める。0からの敗北で初めて降格する。 */
+function applyRankChange(before: RankState, change: number): RankState {
+  const state = normalizeRankState(before.tier, before.points)
+  const delta = Math.trunc(Number.isFinite(change) ? change : 0)
+  if (delta >= 0) return rankStateFromLegacyTotal(Math.min(MAX_TOTAL_RANK_POINTS, rankStateToTotal(state) + delta))
+  const loss = Math.abs(delta)
+  if (state.points > 0) return { tier: state.tier, points: Math.max(0, state.points - loss) }
+  if (state.tier === MIN_RANK) return { tier: MIN_RANK, points: 0 }
+  return { tier: state.tier - 1, points: clampInteger(500 - loss, 0, MAX_RANK_POINTS) }
+}
+function seasonStartRankFromPreviousTier(previousTier: number): RankState {
+  if (previousTier <= 4) return { tier: 1, points: 250 }
+  if (previousTier <= 7) return { tier: 2, points: 250 }
+  return { tier: 3, points: 250 }
+}
+function monthFromSeasonLabel(label: string | undefined): string | null {
+  if (!label) return null
+  const match = label.match(/^(\d{4})年(\d{1,2})月シーズン$/)
+  if (!match) return null
+  return `${match[1]}-${String(Number(match[2])).padStart(2, '0')}`
+}
+const currentMonthKey = () => today().slice(0, 7)
+function previousMonthKey(): string {
+  const now = new Date()
+  const previous = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, '0')}`
+}
+function seasonLabelFromMonthKey(monthKey: string): string {
+  const [year, month] = monthKey.split('-')
+  return year && month ? `${year}年${Number(month)}月シーズン` : ''
+}
+const freshStore = (): Store => {
+  // リセットするまでは前月シーズンを維持し、12日以降の自動リセット対象にする。
+  const previousMonth = previousMonthKey()
+  return {
+    matches: [], heroes: initialHeroes, maps: initialMaps, initialRankPoints: null, lastMode: 'バトアリ',
+    currentRankTier: 1, currentRankPoints: 0,
+    activeSeason: seasonLabelFromMonthKey(previousMonth), lastSeasonResetMonth: previousMonth
+  }
+}
 const mergeHeroes = (saved: Hero[] | undefined | null): Hero[] => {
   const merged = new Map<string, Hero>()
   initialHeroes.forEach(hero => merged.set(hero.name, hero))
-  // お気に入りは維持しつつ、標準ヒーローのロールは初期定義で補正します。
+  // お気に入りは維持しつつ、標準ヒーローのロールは最新定義で補正します。
   ;(saved ?? []).forEach(hero => {
     if (hero && typeof hero.name === 'string' && roles.includes(hero.role)) {
       const canonical = merged.get(hero.name)
@@ -120,22 +197,51 @@ const mergeHeroes = (saved: Hero[] | undefined | null): Hero[] => {
   })
   return [...merged.values()]
 }
+function normalizeStore(input: Partial<Store> | null | undefined): Store {
+  const matches = Array.isArray(input?.matches) ? input.matches : []
+  const heroes = mergeHeroes(input?.heroes)
+  const maps = Array.isArray(input?.maps) && input.maps.length ? input.maps : initialMaps
+  const initialRankPoints = typeof input?.initialRankPoints === 'number' ? input.initialRankPoints : null
+  const chronological = [...matches].sort((a, b) => a.playedAt.localeCompare(b.playedAt))
+  let inferredRank: RankState
+  if (Number.isInteger(input?.currentRankTier) && Number(input?.currentRankTier) >= MIN_RANK && Number(input?.currentRankTier) <= MAX_RANK
+    && Number.isInteger(input?.currentRankPoints) && Number(input?.currentRankPoints) >= 0 && Number(input?.currentRankPoints) <= MAX_RANK_POINTS) {
+    inferredRank = normalizeRankState(Number(input.currentRankTier), Number(input.currentRankPoints))
+  } else {
+    const latestSnapshot = [...chronological].reverse().find(match => typeof match.rankPoints === 'number')
+    let legacyTotal: number | null = null
+    if (latestSnapshot && typeof latestSnapshot.rankPoints === 'number') {
+      legacyTotal = latestSnapshot.rankPoints + chronological
+        .filter(match => match.playedAt > latestSnapshot.playedAt && typeof match.rankChange === 'number')
+        .reduce((sum, match) => sum + Number(match.rankChange || 0), 0)
+    } else if (initialRankPoints !== null) {
+      legacyTotal = initialRankPoints + chronological.reduce((sum, match) => sum + (typeof match.rankChange === 'number' ? match.rankChange : 0), 0)
+    }
+    inferredRank = legacyTotal === null ? { tier: 1, points: 0 } : rankStateFromLegacyTotal(legacyTotal)
+  }
+  const now = nowLocalInput()
+  const latestSeason = [...chronological].reverse().find(match => typeof match.season === 'string' && match.season.trim())?.season
+  const activeSeason = typeof input?.activeSeason === 'string' && input.activeSeason.trim()
+    ? input.activeSeason
+    : latestSeason || seasonLabelFromDate(now)
+  // 旧版にはリセット履歴がないため、今月のリセット未実施として移行します。
+  // 12日以降なら初回表示時に一度だけ自動リセットされます。
+  const resetMonth = typeof input?.lastSeasonResetMonth === 'string' && /^\d{4}-\d{2}$/.test(input.lastSeasonResetMonth)
+    ? input.lastSeasonResetMonth
+    : previousMonthKey()
+  return {
+    ...(input ?? {}), matches, heroes, maps, initialRankPoints,
+    lastMode: input?.lastMode === 'フリバ' ? 'フリバ' : 'バトアリ',
+    currentRankTier: inferredRank.tier, currentRankPoints: inferredRank.points,
+    activeSeason, lastSeasonResetMonth: resetMonth
+  }
+}
 function loadStore(): Store {
   try {
     const raw = localStorage.getItem(storageKey)
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<Store>
-      return {
-        ...parsed,
-        matches: Array.isArray(parsed.matches) ? parsed.matches : [],
-        heroes: mergeHeroes(parsed.heroes),
-        maps: Array.isArray(parsed.maps) && parsed.maps.length ? parsed.maps : initialMaps,
-        initialRankPoints: typeof parsed.initialRankPoints === 'number' ? parsed.initialRankPoints : null,
-        lastMode: parsed.lastMode === 'フリバ' ? 'フリバ' : 'バトアリ'
-      }
-    }
+    if (raw) return normalizeStore(JSON.parse(raw) as Partial<Store>)
   } catch { /* 壊れたローカルデータは初期値で開始 */ }
-  return { matches: [], heroes: initialHeroes, maps: initialMaps, initialRankPoints: null, lastMode: 'バトアリ' }
+  return freshStore()
 }
 function resultLabel(result: Result) { return result === 'win' ? '勝ち' : result === 'loss' ? '負け' : '引き分け' }
 function percent(n: number, d: number) { return d ? `${Math.round(n / d * 100)}%` : '—' }
@@ -147,23 +253,13 @@ function signedText(value: number | null | undefined) {
   if (value == null) return '—'
   return value > 0 ? `+${value.toLocaleString()}` : value.toLocaleString()
 }
-function calculateRankBefore(matches: Match[], initialRankPoints: number | null | undefined, before: string, excludeId?: string): number | null {
-  const earlier = matches.filter(match => match.id !== excludeId && match.playedAt < before).sort((a, b) => a.playedAt.localeCompare(b.playedAt))
-  const latestSnapshot = [...earlier].reverse().find(match => typeof match.rankPoints === 'number')
-  if (latestSnapshot) {
-    let total = latestSnapshot.rankPoints as number
-    for (const match of earlier) {
-      if (match.playedAt > latestSnapshot.playedAt && typeof match.rankChange === 'number') total += match.rankChange
-    }
-    return total
-  }
-  if (typeof initialRankPoints !== 'number') return null
-  return initialRankPoints + earlier.reduce((sum, match) => sum + (typeof match.rankChange === 'number' ? match.rankChange : 0), 0)
-}
-
 function TrackerApp() {
   const cloud = useContext(CloudContext)
   const [store, setStore] = useState<Store>(loadStore)
+  const storeRef = useRef(store)
+  const [rankTierDraft, setRankTierDraft] = useState(String(store.currentRankTier ?? 1))
+  const [rankPointsDraft, setRankPointsDraft] = useState(String(store.currentRankPoints ?? 0))
+  const [resetConfirmStep, setResetConfirmStep] = useState(false)
   const [page, setPage] = useState<Page>('dashboard')
   const [toast, setToast] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -178,7 +274,7 @@ function TrackerApp() {
   const [initialRankDraft, setInitialRankDraft] = useState(store.initialRankPoints == null ? '' : String(store.initialRankPoints))
   const importRef = useRef<HTMLInputElement>(null)
   const [form, setForm] = useState({
-    playedAt: nowLocalInput(), seasonEnabled: false, mode: (store.lastMode ?? 'バトアリ') as Mode,
+    playedAt: nowLocalInput(), seasonEnabled: false, seasonLabel: store.activeSeason ?? seasonLabelFromDate(nowLocalInput()), mode: (store.lastMode ?? 'バトアリ') as Mode,
     heroName: store.heroes[0]?.name ?? '', mapName: store.maps[0] ?? '', result: 'win' as Result,
     rankDirection: 'plus' as 'plus' | 'minus', rankDelta: '0', memo: ''
   })
@@ -186,20 +282,34 @@ function TrackerApp() {
   const [heroRoleDraft, setHeroRoleDraft] = useState<Role>('アタッカー')
   const [mapDraft, setMapDraft] = useState('')
 
+  useEffect(() => { storeRef.current = store }, [store])
   useEffect(() => { localStorage.setItem(storageKey, JSON.stringify(store)); cloud?.saveCloudStore(store) }, [store])
+  useEffect(() => {
+    const checkAutomaticSeasonReset = () => {
+      const current = storeRef.current
+      const date = today()
+      const month = date.slice(0, 7)
+      const day = Number(date.slice(8, 10))
+      if (day < 12 || current.lastSeasonResetMonth === month) return
+      const startRank = seasonStartRankFromPreviousTier(current.currentRankTier ?? 1)
+      const season = seasonLabelFromDate(nowLocalInput())
+      const updated: Store = { ...current, currentRankTier: startRank.tier, currentRankPoints: startRank.points, activeSeason: season, lastSeasonResetMonth: month }
+      storeRef.current = updated
+      setStore(updated)
+      setRankTierDraft(String(startRank.tier))
+      setRankPointsDraft(String(startRank.points))
+      setResetConfirmStep(false)
+      notify(`${season}へ自動リセットしました（S${startRank.tier}・250pt）`)
+    }
+    checkAutomaticSeasonReset()
+    const interval = window.setInterval(checkAutomaticSeasonReset, 60 * 60 * 1000)
+    return () => window.clearInterval(interval)
+  }, [])
   const sortedMatches = useMemo(() => [...store.matches].sort((a, b) => b.playedAt.localeCompare(a.playedAt)), [store.matches])
   const wins = store.matches.filter(m => m.result === 'win').length
   const losses = store.matches.filter(m => m.result === 'loss').length
   const winRate = percent(wins, wins + losses)
-  const latestRank = useMemo(() => {
-    const ordered = [...store.matches].sort((a, b) => a.playedAt.localeCompare(b.playedAt))
-    const latestSnapshot = [...ordered].reverse().find(match => typeof match.rankPoints === 'number')
-    if (latestSnapshot) {
-      return (latestSnapshot.rankPoints as number) + ordered.reduce((sum, match) => sum + (match.playedAt > latestSnapshot.playedAt && typeof match.rankChange === 'number' ? match.rankChange : 0), 0)
-    }
-    if (typeof store.initialRankPoints !== 'number') return null
-    return store.initialRankPoints + ordered.reduce((sum, match) => sum + (typeof match.rankChange === 'number' ? match.rankChange : 0), 0)
-  }, [store.matches, store.initialRankPoints])
+  const currentRankState = normalizeRankState(store.currentRankTier ?? 1, store.currentRankPoints ?? 0)
   const currentMonth = today().slice(0, 7)
   const currentMonthMatches = store.matches.filter(m => m.playedAt.slice(0, 7) === currentMonth)
   const currentMonthWins = currentMonthMatches.filter(m => m.result === 'win').length
@@ -253,7 +363,10 @@ function TrackerApp() {
     setHeroSearch('')
     setHeroRoleFilter('all')
     setFavoritesOnly(false)
-    setForm({ playedAt: nowLocalInput(), seasonEnabled: false, mode: store.lastMode ?? 'バトアリ', heroName: store.heroes[0]?.name ?? '', mapName: store.maps[0] ?? '', result: 'win', rankDirection: 'plus', rankDelta: '0', memo: '' })
+    setForm({ playedAt: nowLocalInput(), seasonEnabled: false, seasonLabel: store.activeSeason ?? seasonLabelFromDate(nowLocalInput()), mode: store.lastMode ?? 'バトアリ', heroName: store.heroes[0]?.name ?? '', mapName: store.maps[0] ?? '', result: 'win', rankDirection: 'plus', rankDelta: '0', memo: '' })
+    setRankTierDraft(String(store.currentRankTier ?? 1))
+    setRankPointsDraft(String(store.currentRankPoints ?? 0))
+    setResetConfirmStep(false)
     setPage('add')
   }
   function beginEditMatch(match: Match) {
@@ -261,11 +374,64 @@ function TrackerApp() {
     setHeroSearch('')
     setHeroRoleFilter('all')
     setFavoritesOnly(false)
-    setForm({ playedAt: normalizeDateTime(match.playedAt), seasonEnabled: Boolean(match.season) && (match.mode ?? 'バトアリ') === 'バトアリ', mode: match.mode ?? 'バトアリ', heroName: match.heroName, mapName: match.mapName, result: match.result, rankDirection: (match.rankChange ?? (match.result === 'loss' ? -1 : 1)) < 0 ? 'minus' : 'plus', rankDelta: String(Math.abs(match.rankChange ?? 0)), memo: match.memo ?? '' })
+    setForm({ playedAt: normalizeDateTime(match.playedAt), seasonEnabled: Boolean(match.season) && (match.mode ?? 'バトアリ') === 'バトアリ', seasonLabel: match.season || store.activeSeason || seasonLabelFromDate(nowLocalInput()), mode: match.mode ?? 'バトアリ', heroName: match.heroName, mapName: match.mapName, result: match.result, rankDirection: (match.rankChange ?? (match.result === 'loss' ? -1 : 1)) < 0 ? 'minus' : 'plus', rankDelta: String(Math.abs(match.rankChange ?? 0)), memo: match.memo ?? '' })
+    setResetConfirmStep(false)
     setPage('add')
   }
   function changeResult(result: Result) {
     setForm(old => ({ ...old, result, rankDirection: result === 'loss' ? 'minus' : 'plus', rankDelta: result === 'draw' ? '0' : old.rankDelta }))
+  }
+  function readRankDraft(): RankState | null {
+    const tier = Number(rankTierDraft)
+    const points = Number(rankPointsDraft)
+    if (!Number.isInteger(tier) || tier < MIN_RANK || tier > MAX_RANK) {
+      notify('ランクはS1〜S9から選択してください')
+      return null
+    }
+    if (!Number.isInteger(points) || points < 0 || points > MAX_RANK_POINTS) {
+      notify('ランクポイントは0〜499の整数で入力してください')
+      return null
+    }
+    return { tier, points }
+  }
+  function saveCurrentRank() {
+    const rank = readRankDraft()
+    if (!rank) return
+    const updated = { ...storeRef.current, currentRankTier: rank.tier, currentRankPoints: rank.points }
+    storeRef.current = updated
+    setStore(updated)
+    setRankTierDraft(String(rank.tier))
+    setRankPointsDraft(String(rank.points))
+    notify(`現在のランクを ${formatRankState(rank)} に更新しました`)
+  }
+  function performSeasonReset() {
+    const month = currentMonthKey()
+    // 自動または手動で今月分をリセット済みなら、二重リセットを防止します。
+    if (storeRef.current.lastSeasonResetMonth === month) {
+      setResetConfirmStep(false)
+      notify('今月のシーズンはすでにリセット済みです')
+      return
+    }
+    const previousTier = Number(rankTierDraft)
+    if (!Number.isInteger(previousTier) || previousTier < MIN_RANK || previousTier > MAX_RANK) {
+      notify('前回シーズンのランクはS1〜S9から選択してください')
+      return
+    }
+    const startRank = seasonStartRankFromPreviousTier(previousTier)
+    const season = seasonLabelFromDate(nowLocalInput())
+    const updated: Store = {
+      ...storeRef.current,
+      currentRankTier: startRank.tier,
+      currentRankPoints: startRank.points,
+      activeSeason: season,
+      lastSeasonResetMonth: month
+    }
+    storeRef.current = updated
+    setStore(updated)
+    setRankTierDraft(String(startRank.tier))
+    setRankPointsDraft(String(startRank.points))
+    setResetConfirmStep(false)
+    notify(`シーズンを ${season} にリセットしました（S${startRank.tier}・250pt）`)
   }
   function saveMatch(e: React.FormEvent) {
     e.preventDefault()
@@ -275,22 +441,51 @@ function TrackerApp() {
     const recordedAt = editingId ? normalizeDateTime(form.playedAt) : nowLocalInput()
     const amountText = form.rankDelta.trim()
     const amount = amountText === '' ? 0 : Number(amountText)
-    if (!Number.isFinite(amount) || amount < 0) { notify('RP変動は0以上の数値で入力してください'); return }
-    const signedChange = form.result === 'draw' ? 0 : (form.rankDirection === 'minus' ? -Math.abs(amount) : Math.abs(amount))
-    const previousRank = calculateRankBefore(store.matches, store.initialRankPoints, recordedAt, editingId ?? undefined)
-    const calculatedTotal = previousRank == null ? null : previousRank + signedChange
+    if (!Number.isFinite(amount) || amount < 0 || !Number.isInteger(amount)) { notify('RP変動は0以上の整数で入力してください'); return }
+    const rankedMatch = form.mode === 'バトアリ'
+    const requestedChange = form.result === 'draw' || !rankedMatch ? 0 : (form.rankDirection === 'minus' ? -Math.abs(amount) : Math.abs(amount))
+    const existingMatch = editingId ? store.matches.find(m => m.id === editingId) : undefined
+    const parsedDraft = readRankDraft()
+    if (!parsedDraft) return
+    const rankBefore = existingMatch && Number.isInteger(existingMatch.rankBeforeTier) && Number.isInteger(existingMatch.rankBeforePoints)
+      ? normalizeRankState(Number(existingMatch.rankBeforeTier), Number(existingMatch.rankBeforePoints))
+      : existingMatch && typeof existingMatch.rankPoints === 'number'
+        ? rankStateFromLegacyTotal(existingMatch.rankPoints - (typeof existingMatch.rankChange === 'number' ? existingMatch.rankChange : 0))
+        : rankedMatch ? parsedDraft : currentRankState
+    const rankAfter = rankedMatch ? applyRankChange(rankBefore, requestedChange) : rankBefore
+    const season = form.mode === 'バトアリ' && form.seasonEnabled
+      ? (editingId ? (form.seasonLabel || store.activeSeason || seasonLabelFromDate(recordedAt)) : (store.activeSeason || seasonLabelFromDate(recordedAt)))
+      : ''
     const match: Match = {
       id: editingId ?? crypto.randomUUID(), playedAt: recordedAt,
-      season: form.mode === 'バトアリ' && form.seasonEnabled ? seasonLabelFromDate(recordedAt) : '',
+      season,
       heroName: hero.name, heroRole: hero.role, mapName: form.mapName, result: form.result,
-      rankPoints: calculatedTotal, rankChange: signedChange, mode: form.mode, memo: form.memo.trim()
+      rankPoints: rankStateToTotal(rankAfter), rankChange: requestedChange, mode: form.mode, memo: form.memo.trim(),
+      rankBeforeTier: rankBefore.tier, rankBeforePoints: rankBefore.points,
+      rankAfterTier: rankAfter.tier, rankAfterPoints: rankAfter.points
     }
-    if (editingId) setStore(s => ({ ...s, lastMode: form.mode, matches: s.matches.map(m => m.id === editingId ? match : m) }))
-    else setStore(s => ({ ...s, lastMode: form.mode, matches: [match, ...s.matches] }))
+    if (editingId) {
+      const updated: Store = { ...storeRef.current, lastMode: form.mode, matches: storeRef.current.matches.map(m => m.id === editingId ? match : m) }
+      storeRef.current = updated
+      setStore(updated)
+    } else {
+      const updated: Store = {
+        ...storeRef.current,
+        lastMode: form.mode,
+        matches: [match, ...storeRef.current.matches],
+        ...(rankedMatch ? { currentRankTier: rankAfter.tier, currentRankPoints: rankAfter.points } : {})
+      }
+      storeRef.current = updated
+      setStore(updated)
+      if (rankedMatch) {
+        setRankTierDraft(String(rankAfter.tier))
+        setRankPointsDraft(String(rankAfter.points))
+      }
+    }
     const wasEditing = editingId !== null
     setEditingId(null)
     setPage('dashboard')
-    notify(wasEditing ? '試合記録を更新しました' : '試合を記録しました')
+    notify(wasEditing ? '試合記録を更新しました' : rankedMatch ? `試合を記録しました（${formatRankState(rankAfter)}）` : 'フリバの試合を記録しました（ランク変動なし）')
   }
   function deleteMatch(id: string) {
     if (!window.confirm('この試合記録を削除しますか？')) return
@@ -310,8 +505,12 @@ function TrackerApp() {
         const data = JSON.parse(String(reader.result))
         if (!Array.isArray(data.matches) || !Array.isArray(data.heroes) || !Array.isArray(data.maps)) throw new Error()
         if (!window.confirm('現在のデータをバックアップ内容で置き換えます。よろしいですか？')) return
-        setStore({ ...data, matches: data.matches, heroes: mergeHeroes(data.heroes), maps: data.maps, initialRankPoints: typeof data.initialRankPoints === 'number' ? data.initialRankPoints : null, lastMode: data.lastMode === 'フリバ' ? 'フリバ' : 'バトアリ' })
-        setInitialRankDraft(typeof data.initialRankPoints === 'number' ? String(data.initialRankPoints) : '')
+        const restored = normalizeStore(data as Partial<Store>)
+        storeRef.current = restored
+        setStore(restored)
+        setRankTierDraft(String(restored.currentRankTier ?? 1))
+        setRankPointsDraft(String(restored.currentRankPoints ?? 0))
+        setInitialRankDraft(typeof restored.initialRankPoints === 'number' ? String(restored.initialRankPoints) : '')
         notify('バックアップを復元しました')
       } catch { notify('ファイルを読み込めませんでした。正しいバックアップか確認してください') }
     }
@@ -322,8 +521,10 @@ function TrackerApp() {
     if (text === '') { setStore(s => ({ ...s, initialRankPoints: null })); notify('初期ランクポイントを未設定にしました'); return }
     const value = Number(text)
     if (!Number.isFinite(value)) { notify('初期ランクポイントは数値で入力してください'); return }
-    setStore(s => ({ ...s, initialRankPoints: value }))
-    notify('初期ランクポイントを保存しました')
+    const updated = { ...storeRef.current, initialRankPoints: value }
+    storeRef.current = updated
+    setStore(updated)
+    notify('初期ランクポイントを保存しました（旧形式の記録用）')
   }
   function addHero() {
     const name = heroDraft.trim()
@@ -371,7 +572,7 @@ function TrackerApp() {
         <div className="stats-grid">
           <StatCard icon={<Activity size={19}/>} label="総試合数" value={`${store.matches.length}`} sub="記録した試合" />
           <StatCard icon={<Trophy size={19}/>} label="勝率" value={winRate} sub={`${wins}勝 · ${losses}敗`} />
-          <StatCard icon={<BarChart3 size={19}/>} label="現在のランクポイント" value={latestRank == null ? '—' : latestRank.toLocaleString()} sub={store.initialRankPoints == null ? '初期RP未設定' : `初期RP ${store.initialRankPoints.toLocaleString()}`} />
+          <StatCard icon={<BarChart3 size={19}/>} label="現在のランク" value={`S${currentRankState.tier}`} sub={`${currentRankState.points}/499 pt · ${store.activeSeason ?? 'シーズン未設定'}`} />
           <StatCard icon={<CalendarDays size={19}/>} label="今月の試合" value={`${currentMonthMatches.length}`} sub={`${currentMonthWins}勝 · ${currentMonthLosses}敗`} />
           <StatCard icon={<Activity size={19}/>} label="現在の連続結果" value={currentStreak.count ? `${currentStreak.count}${currentStreak.result}` : '—'} sub="最新の記録から集計" />
           <StatCard icon={<Shield size={19}/>} label="登録ヒーロー" value={`${store.heroes.length}`} sub={`マップ ${store.maps.length} 件`} />
@@ -397,10 +598,30 @@ function TrackerApp() {
         <div className="section-heading"><div><h3>{editingId ? '試合記録を編集' : '試合内容を入力'}</h3><p>{editingId ? '日時や結果、RPの変動を修正できます。' : '日時は保存時に自動で記録します。'}</p></div><div className="round-icon"><Swords size={20}/></div></div>
         <form onSubmit={saveMatch} className="match-form">
           {editingId && <div className="field field-wide"><label>試合日時（分まで）</label><input type="datetime-local" required value={form.playedAt} onChange={e => setForm({ ...form, playedAt: e.target.value })}/></div>}
-          <div className="field field-wide"><label>モード</label><div className="result-options mode-options">
-            {(['バトアリ', 'フリバ'] as Mode[]).map(mode => <button type="button" key={mode} className={`result-choice ${form.mode === mode ? 'selected win' : ''}`} onClick={() => setForm(old => ({ ...old, mode, seasonEnabled: mode === 'フリバ' ? false : old.seasonEnabled }))}>{mode}</button>)}
+          <div className="field field-wide mode-rank-layout">
+            <div className="mode-selection-column">
+              <label>モード</label>
+              <div className="result-options mode-options">
+                {(['バトアリ', 'フリバ'] as Mode[]).map(mode => <button type="button" key={mode} className={`result-choice ${form.mode === mode ? 'selected win' : ''}`} onClick={() => setForm(old => ({ ...old, mode, seasonEnabled: mode === 'フリバ' ? false : old.seasonEnabled }))}>{mode}</button>)}
+              </div>
+              <label className={`season-check ${form.mode === 'フリバ' ? 'season-disabled' : ''}`}><input type="checkbox" disabled={form.mode === 'フリバ'} checked={form.mode === 'バトアリ' && form.seasonEnabled} onChange={e => setForm(old => ({ ...old, seasonEnabled: e.target.checked }))}/><span>シーズン</span></label>
+              <small className="active-season-note">現在のシーズン：{store.activeSeason ?? '未設定'}</small>
+            </div>
+            <section className="rank-control-panel" aria-label="現在のランク設定">
+              <div className="rank-panel-heading"><strong>現在のランク</strong><span>{formatRankState(normalizeRankState(Number(rankTierDraft) || currentRankState.tier, Number(rankPointsDraft) || 0))}</span></div>
+              <div className="rank-edit-grid">
+                <label>ランク<select aria-label="現在のランク" value={rankTierDraft} onChange={e => setRankTierDraft(e.target.value)}>{Array.from({ length: 9 }, (_, index) => index + 1).map(tier => <option key={tier} value={tier}>S{tier}</option>)}</select></label>
+                <label>ポイント（0〜499）<input aria-label="現在のランクポイント" type="number" min="0" max="499" step="1" value={rankPointsDraft} onChange={e => setRankPointsDraft(e.target.value)} /></label>
+              </div>
+              <button type="button" className="secondary-button rank-save-button" onClick={saveCurrentRank}>ランクを保存</button>
+              <div className="season-reset-control">
+                {resetConfirmStep ? <>
+                  <p>前回シーズンのランクを基準に、開始ランクを <strong>{`S${seasonStartRankFromPreviousTier(Number(rankTierDraft) || currentRankState.tier).tier}・250pt`}</strong> にします。現在の試合入力は保持します。</p>
+                  <div className="season-reset-buttons"><button type="button" className="secondary-button" onClick={() => setResetConfirmStep(false)}>キャンセル</button><button type="button" className="danger-button" onClick={performSeasonReset}>リセットを確定</button></div>
+                </> : <button type="button" className="season-reset-button" disabled={store.lastSeasonResetMonth === currentMonthKey()} onClick={() => setResetConfirmStep(true)}>{store.lastSeasonResetMonth === currentMonthKey() ? '今月はリセット済み' : 'シーズンリセット'}</button>}
+              </div>
+            </section>
           </div>
-          <label className={`season-check ${form.mode === 'フリバ' ? 'season-disabled' : ''}`}><input type="checkbox" disabled={form.mode === 'フリバ'} checked={form.mode === 'バトアリ' && form.seasonEnabled} onChange={e => setForm(old => ({ ...old, seasonEnabled: e.target.checked }))}/><span>シーズン</span></label></div>
           <div className="field field-wide hero-picker-controls">
             <div className="hero-search-control"><label>使用ヒーローを検索</label><label className="search-field"><Search size={16}/><input value={heroSearch} onChange={e => setHeroSearch(e.target.value)} placeholder="ヒーロー名を入力" /></label></div>
             <div className="hero-filter-control"><label>絞込み</label>
@@ -418,11 +639,11 @@ function TrackerApp() {
           <div className="field field-wide"><label>試合結果</label><div className="result-options">
             {(['win', 'loss', 'draw'] as Result[]).map(r => <button type="button" key={r} className={`result-choice ${form.result === r ? `selected ${r}` : ''}`} onClick={() => changeResult(r)}>{resultLabel(r)}</button>)}
           </div></div>
-          <div className="field field-wide"><label>ランクポイントの増減 <small>任意・実際の増減量を入力</small></label>
+          {form.mode === 'バトアリ' ? <div className="field field-wide"><label>ランクポイントの増減 <small>実際の増減量を入力</small></label>
             <div className="rp-change-control"><div className="rp-direction-buttons"><button type="button" className={`result-choice ${form.rankDirection === 'plus' ? 'selected win' : ''}`} onClick={() => setForm({ ...form, rankDirection: 'plus' })}><Plus size={16}/> 増加</button><button type="button" className={`result-choice ${form.rankDirection === 'minus' ? 'selected loss' : ''}`} onClick={() => setForm({ ...form, rankDirection: 'minus' })}><Minus size={16}/> 減少</button></div><input aria-label="RP変動量" type="number" min="0" step="1" placeholder="0" value={form.rankDelta} onChange={e => setForm({ ...form, rankDelta: e.target.value })}/><strong className={form.result === 'draw' ? '' : form.rankDirection === 'minus' ? 'negative-rp' : 'positive-rp'}>{form.result === 'draw' ? '±0' : form.rankDirection === 'minus' ? `−${Math.abs(Number(form.rankDelta) || 0).toLocaleString()}` : `+${Math.abs(Number(form.rankDelta) || 0).toLocaleString()}`}</strong></div>
-            <small className="small-note">勝ちを選ぶと「増加」、負けを選ぶと「減少」が自動選択されます。実際のRP変動に合わせて符号と数値を変更できます。引き分けはRP変動を0として記録します。</small>
-            <small className="small-note">試合後のRP合計：{(() => { const before = calculateRankBefore(store.matches, store.initialRankPoints, editingId ? normalizeDateTime(form.playedAt) : nowLocalInput(), editingId ?? undefined); const change = form.result === 'draw' ? 0 : (form.rankDirection === 'minus' ? -1 : 1) * Math.abs(Number(form.rankDelta) || 0); return before == null ? '初期RPを設定すると計算できます' : (before + change).toLocaleString() })()}</small>
-          </div>
+            <small className="small-note">S1〜S9の各ランクは0〜499pt。500pt到達で昇格し、ポイントが残っている間の減少は0ptで止まります。0ptで減少した場合のみ降格します。</small>
+            <small className="small-note">試合後の予測ランク：{(() => { const before = normalizeRankState(Number(rankTierDraft) || currentRankState.tier, Number(rankPointsDraft) || 0); const delta = form.result === 'draw' ? 0 : (form.rankDirection === 'minus' ? -1 : 1) * Math.abs(Number(form.rankDelta) || 0); return formatRankState(applyRankChange(before, delta)) })()}</small>
+          </div> : <div className="field field-wide freeba-rank-note"><strong>フリバではランクポイントは変動しません。</strong><span>現在のランクは記録・確認のみ行います。</span></div>}
           <div className="field field-wide"><label>メモ <small>任意</small></label><textarea rows={3} placeholder="味方編成、反省点、気づいたことなど" value={form.memo} onChange={e => setForm({ ...form, memo: e.target.value })}/></div>
           <div className="form-actions"><button type="button" className="secondary-button" onClick={() => { setEditingId(null); setPage('dashboard') }}>キャンセル</button><button type="submit" className="primary-button">{editingId ? <><Pencil size={17}/> 変更を保存</> : <><Plus size={17}/> 記録を保存</>}</button></div>
         </form>
@@ -442,9 +663,9 @@ function TrackerApp() {
 
       {page === 'settings' && <section className="page-stack">
         <div className="content-card">
-          <div className="section-heading"><div><h3>ランクポイント設定</h3><p>最初に記録する時点のRPを入力してください。</p></div><div className="round-icon"><BarChart3 size={20}/></div></div>
+          <div className="section-heading"><div><h3>旧形式のランクポイント設定</h3><p>古い記録との互換用です。現在のランクは試合入力画面で編集できます。</p></div><div className="round-icon"><BarChart3 size={20}/></div></div>
           <div className="initial-rp-setting"><div className="field"><label>初期ランクポイント</label><input type="number" step="1" placeholder="例：1500" value={initialRankDraft} onChange={e => setInitialRankDraft(e.target.value)}/></div><button className="primary-button" onClick={saveInitialRankPoints}>初期RPを保存</button></div>
-          <p className="small-note">初期RPと試合ごとの増減量から、試合後のRP合計を計算します。過去の記録に保存されたRP合計は維持されます。</p>
+          <p className="small-note">新しい試合ではS1〜S9のランク規則を使用します。この設定は旧形式データの読み込み互換用として残しています。</p>
         </div>
         <div className="content-card">
           <div className="section-heading"><div><h3>バックアップと復元</h3><p>記録データを JSON ファイルとして保存できます。</p></div><div className="round-icon"><Shield size={20}/></div></div>
@@ -461,7 +682,7 @@ function TrackerApp() {
           <div className="catalog-add"><input value={mapDraft} placeholder="マップ名" onChange={e => setMapDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addMap())}/><button className="primary-button" onClick={addMap}><Plus size={16}/> 追加</button></div>
           <div className="catalog-list map-list">{store.maps.map(m => <div className="catalog-item" key={m}><span>{m}</span><button className="icon-button" aria-label={`${m}を削除`} onClick={() => removeMap(m)}><Trash2 size={16}/></button></div>)}</div>
         </div>
-        <div className="content-card future-card"><div className="round-icon"><Activity size={20}/></div><div><h3>現在の機能</h3><p>試合日時（分単位）、モード、月ごとのシーズン記録、実装順のヒーロー選択、お気に入り・ロール絞込み、RP増減、初期RP、バックアップ・復元に対応しています。</p></div></div>
+        <div className="content-card future-card"><div className="round-icon"><Activity size={20}/></div><div><h3>現在の機能</h3><p>試合日時、バトアリ／フリバ、リセット操作で切り替わるシーズン、実装時期順のヒーロー選択、お気に入り・ロール絞込み、S1〜S9のランク・ポイント管理、バックアップ・復元に対応しています。</p></div></div>
       </section>}
       <footer className="app-footer">コンパス戦績ノート <span>·</span> Version 0.2.0</footer>
     </main>
@@ -479,7 +700,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
   return <div className="empty-state"><div className="empty-icon"><History size={24}/></div><h4>まだ試合記録がありません</h4><p>最初の試合を記録して、戦績の分析を始めましょう。</p><button className="primary-button" onClick={onAdd}><Plus size={17}/> 最初の試合を記録</button></div>
 }
 function MatchTable({ matches, onEdit, onDelete }: { matches: Match[]; onEdit: (match: Match) => void; onDelete: (id: string) => void }) {
-  return <div className="table-wrap"><table className="match-table"><thead><tr><th>日時</th><th>モード／シーズン</th><th>ヒーロー</th><th>マップ</th><th>結果</th><th>RP変動</th><th>RP合計</th><th>操作</th></tr></thead><tbody>{matches.map(m => <tr key={m.id}><td className="date-cell">{formatDateTime(m.playedAt)}</td><td><div className="hero-cell"><strong>{m.mode ?? 'バトアリ'}</strong><small>{m.season || '通常記録'}</small></div></td><td><div className="hero-cell"><strong>{m.heroName}</strong><small>{m.heroRole}</small></div></td><td className="map-cell">{m.mapName}</td><td><span className={`result-pill ${m.result}`}>{resultLabel(m.result)}</span></td><td className="rp-cell">{signedText(m.rankChange)}</td><td className="rp-cell">{m.rankPoints == null ? '—' : m.rankPoints.toLocaleString()}</td><td><div className="row-actions"><button className="icon-button edit-icon" aria-label={`${m.playedAt}の記録を編集`} title="編集" onClick={() => onEdit(m)}><Pencil size={15}/></button><button className="icon-button" aria-label="記録を削除" title="削除" onClick={() => onDelete(m.id)}><Trash2 size={15}/></button></div></td></tr>)}</tbody></table></div>
+  return <div className="table-wrap"><table className="match-table"><thead><tr><th>日時</th><th>モード／シーズン</th><th>ヒーロー</th><th>マップ</th><th>結果</th><th>RP変動</th><th>試合後ランク</th><th>操作</th></tr></thead><tbody>{matches.map(m => <tr key={m.id}><td className="date-cell">{formatDateTime(m.playedAt)}</td><td><div className="hero-cell"><strong>{m.mode ?? 'バトアリ'}</strong><small>{m.season || '通常記録'}</small></div></td><td><div className="hero-cell"><strong>{m.heroName}</strong><small>{m.heroRole}</small></div></td><td className="map-cell">{m.mapName}</td><td><span className={`result-pill ${m.result}`}>{resultLabel(m.result)}</span></td><td className="rp-cell">{signedText(m.rankChange)}</td><td className="rp-cell">{Number.isInteger(m.rankAfterTier) && Number.isInteger(m.rankAfterPoints) ? formatRankState(normalizeRankState(Number(m.rankAfterTier), Number(m.rankAfterPoints))) : m.rankPoints == null ? '—' : formatRankState(rankStateFromLegacyTotal(m.rankPoints))}</td><td><div className="row-actions"><button className="icon-button edit-icon" aria-label={`${m.playedAt}の記録を編集`} title="編集" onClick={() => onEdit(m)}><Pencil size={15}/></button><button className="icon-button" aria-label="記録を削除" title="削除" onClick={() => onDelete(m.id)}><Trash2 size={15}/></button></div></td></tr>)}</tbody></table></div>
 }
 
 function readLocalStore(): Store | null {
@@ -488,7 +709,7 @@ function readLocalStore(): Store | null {
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<Store>
     if (!Array.isArray(parsed.matches) || !Array.isArray(parsed.heroes) || !Array.isArray(parsed.maps)) return null
-    return { ...parsed, matches: parsed.matches, heroes: mergeHeroes(parsed.heroes), maps: parsed.maps, initialRankPoints: typeof parsed.initialRankPoints === 'number' ? parsed.initialRankPoints : null, lastMode: parsed.lastMode === 'フリバ' ? 'フリバ' : 'バトアリ' }
+    return normalizeStore(parsed)
   } catch { return null }
 }
 
@@ -522,11 +743,11 @@ export default function App() {
       if (!active) return
       if (error) { setMessage(`クラウドデータを読み込めませんでした：${error.message}`); setSyncStatus('エラー'); return }
       if (data?.payload && typeof data.payload === 'object') {
-        const payload = data.payload as Partial<Store>
-        localStorage.setItem(storageKey, JSON.stringify({ ...payload, matches: Array.isArray(payload.matches) ? payload.matches : [], heroes: mergeHeroes(payload.heroes), maps: Array.isArray(payload.maps) && payload.maps.length ? payload.maps : initialMaps, initialRankPoints: typeof payload.initialRankPoints === 'number' ? payload.initialRankPoints : null, lastMode: payload.lastMode === 'フリバ' ? 'フリバ' : 'バトアリ' }))
+        const payload = normalizeStore(data.payload as Partial<Store>)
+        localStorage.setItem(storageKey, JSON.stringify(payload))
         setSyncStatus('同期済み')
       } else {
-        const local = readLocalStore() ?? { matches: [], heroes: initialHeroes, maps: initialMaps, initialRankPoints: null, lastMode: 'バトアリ' as Mode }
+        const local = readLocalStore() ?? freshStore()
         const { error: saveError } = await supabase.from('user_data').upsert({ user_id: user.id, payload: local, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
         if (!active) return
         if (saveError) { setMessage(`初回データ保存に失敗しました：${saveError.message}`); setSyncStatus('エラー'); return }
