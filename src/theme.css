@@ -165,3 +165,49 @@ html[data-theme] .cloud-user-bar button:not(.theme-toggle):hover { border-color:
   html[data-theme] .top-add { box-shadow: none; }
   .auth-shell > .theme-toggle { top: 12px; left: 12px; }
 }
+
+
+/* COMPASS MATCH FOLLOW-UP v1 */
+html[data-theme="light"] .season-check {
+  background: #fff;
+  color: #183540;
+  border: 1px solid #7da7b2;
+  box-shadow: 0 2px 8px rgba(25, 87, 103, .10);
+}
+html[data-theme="light"] .season-check span { color: #183540; }
+html[data-theme="light"] .season-check input[type="checkbox"] {
+  appearance: auto !important;
+  -webkit-appearance: checkbox !important;
+  display: inline-block !important;
+  flex: 0 0 18px;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 2px solid #087f8c !important;
+  border-radius: 4px;
+  background: #fff !important;
+  accent-color: #007f90;
+  box-shadow: none !important;
+  cursor: pointer;
+}
+html[data-theme="light"] .season-check input[type="checkbox"]:focus-visible { outline: 3px solid rgba(0, 127, 144, .28); outline-offset: 2px; }
+html[data-theme="light"] .season-check input[type="checkbox"]:disabled { opacity: .55; cursor: not-allowed; }
+.record-form-heading { min-height: 52px; }
+.record-current-rank { display: flex; flex-direction: column; gap: 5px; }
+.record-current-rank > span { color: var(--text-muted, #829aa8); font-size: 11px; font-weight: 700; }
+.record-current-rank > strong { color: var(--text-main, inherit); font-size: clamp(21px, 2.4vw, 29px); line-height: 1.2; letter-spacing: -.025em; }
+.mode-selection-only { width: 100%; max-width: 620px; }
+.mode-selection-only .mode-selection-column { width: 100%; }
+.mode-selection-only .season-check { align-self: flex-start; }
+.team-select-with-lock { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
+.team-select-with-lock select { flex: 1 1 auto; min-width: 0; }
+.ally-slot-lock { width: 39px; min-width: 39px; padding: 7px !important; }
+.ally-slot-lock svg { width: 17px; height: 17px; }
+html[data-theme="light"] .ally-slot-lock { background: #fff; color: #3c5963; border-color: #9ab7c0; }
+html[data-theme="light"] .ally-slot-lock.locked { background: #def8fa; color: #007f90; border-color: #00a5b7; }
+@media (max-width: 700px) {
+  .record-current-rank > strong { font-size: 24px; }
+  .mode-selection-only { max-width: none; }
+}
