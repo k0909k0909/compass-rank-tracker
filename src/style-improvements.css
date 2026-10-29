@@ -239,3 +239,42 @@
 .win-rate-footer small { min-width: 0; font-size: 10px; }
 .win-rate-limit { max-width: 112px; min-width: 0; border: 1px solid #303951; border-radius: 6px; padding: 4px 5px; background: #0e1526; color: #b8c2d8; font-size: 10px; }
 @media (max-width: 520px) { .win-rate-footer { align-items: flex-start; flex-direction: column; } .win-rate-limit { max-width: 100%; width: 100%; } }
+
+
+/* COMPASS MATCH COMPOSITION IMPROVEMENTS v1 */
+.match-form { display: block; }
+.mode-selection-column .mode-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.match-slide-viewport { width: 100%; overflow: hidden; touch-action: pan-y; }
+.match-slide-track { display: flex; align-items: flex-start; width: 200%; transition: transform .3s cubic-bezier(.2,.8,.2,1); }
+.match-slide-track.show-team-page { transform: translateX(-50%); }
+.match-slide { flex: 0 0 50%; width: 50%; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: 18px 16px; padding: 2px 1px; }
+.match-slide > .field-wide, .match-slide > .record-slide-nav, .match-slide > .team-page-heading, .match-slide > .team-composition-grid { grid-column: 1 / -1; }
+.record-slide-nav { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; border-top: 1px solid var(--line, #303951); padding-top: 15px; margin-top: 4px; }
+.record-slide-steps { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.record-slide-step { display: inline-flex; align-items: center; min-height: 29px; padding: 6px 10px; border-radius: 8px; background: var(--surface-muted, #0b1320); color: var(--text-muted, #829aa8); font-size: 10px; font-weight: 700; }
+.record-slide-step.active { color: var(--accent-strong, #009bad); background: var(--accent-soft, #def8fa); }
+.team-page-nav { border-top: 0; padding-top: 0; margin-bottom: 2px; }
+.team-page-heading h4 { margin: 0 0 5px; font-size: 15px; color: var(--text-main, inherit); }
+.team-page-heading p { margin: 0; color: var(--text-muted, #829aa8); font-size: 11px; line-height: 1.7; }
+.team-composition-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.team-composition-side { min-width: 0; padding: 14px; border: 1px solid var(--line, #303951); background: var(--surface, #101725); border-radius: 12px; }
+.team-composition-side h4 { margin: 0; color: var(--text-main, inherit); font-size: 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.team-composition-side h4 small { color: var(--text-muted, #829aa8); font-size: 10px; font-weight: 500; }
+.team-side-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.team-select-list { display: grid; gap: 10px; }
+.team-select-list label { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; color: var(--text-soft, #b5cbd5); font-size: 11px; }
+.team-select-list select { min-width: 0; width: 100%; }
+.ally-lock-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; border: 1px solid var(--line, #293c4b); border-radius: 9px; background: var(--surface-raised, #141f30); color: var(--text-soft, #b5cbd5); padding: 7px 9px; font-size: 10px; font-weight: 800; }
+.ally-lock-toggle svg { width: 15px; height: 15px; }
+.ally-lock-toggle.locked { color: var(--accent-strong, #04bfd0); background: var(--accent-soft, #10313a); border-color: var(--accent-line, #24616c); }
+.team-lock-help { margin: 10px 0 0; color: var(--text-muted, #829aa8); font-size: 10px; line-height: 1.6; }
+.current-rank-stat-card > strong { font-size: clamp(18px, 2.3vw, 27px) !important; line-height: 1.35; letter-spacing: -.035em; white-space: nowrap; }
+.current-rank-stat-card > small { display: block; margin-top: 5px; font-size: 10px; }
+@media (max-width: 700px) {
+  .match-slide { grid-template-columns: minmax(0, 1fr); gap: 15px; }
+  .team-composition-grid { grid-template-columns: minmax(0, 1fr); }
+  .record-slide-nav { align-items: stretch; }
+  .record-slide-nav > .secondary-button { flex: 1 1 auto; }
+  .record-slide-steps { width: 100%; }
+  .current-rank-stat-card > strong { font-size: clamp(18px, 5vw, 24px) !important; }
+}
