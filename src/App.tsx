@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { createClient, type User } from '@supabase/supabase-js'
-import { Activity, BarChart3, CalendarDays, Download, FileUp, Gauge, History, Lock, Minus, Pencil, Plus, Search, Settings, Shield, Star, Sun, Moon, Swords, Trash2, Trophy, Unlock, X } from 'lucide-react'
+import { Activity, BarChart3, CalendarDays, ChevronDown, Download, FileUp, Gauge, History, Lock, Minus, Pencil, Plus, Search, Settings, Shield, Star, Sun, Moon, Swords, Trash2, Trophy, Unlock, X } from 'lucide-react'
 import compassNoteMark from './assets/compass-note-mark.svg'
 import './style.css'
 import './style-improvements.css'
@@ -9,7 +9,7 @@ import './theme.css'
 type Role = 'アタッカー' | 'ガンナー' | 'タンク' | 'スプリンター'
 type Result = 'win' | 'loss' | 'draw'
 type Mode = 'バトアリ' | 'フリバ' | 'カスタム'
-type Hero = { name: string; role: Role; favorite?: boolean }
+type Hero = { name: string; role: Role; favorite?: boolean; aliases?: string[] }
 type Match = {
   id: string
   playedAt: string
@@ -258,6 +258,18 @@ function signedText(value: number | null | undefined) {
   if (value == null) return '—'
   return value > 0 ? `+${value.toLocaleString()}` : value.toLocaleString()
 }
+function normalizeHeroSearchText(value: string) {
+  return value.normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/[\u30a1-\u30f6]/g, character => String.fromCharCode(character.charCodeAt(0) - 0x60))
+    .replace(/[\s\u3000]/g, '')
+}
+function heroMatchesSearch(hero: Hero, query: string) {
+  const needle = normalizeHeroSearchText(query)
+  if (!needle) return true
+  return [hero.name, ...(hero.aliases ?? [])].some(value => normalizeHeroSearchText(value).includes(needle))
+}
+
 function TrackerApp() {
   const cloud = useContext(CloudContext)
   const [store, setStore] = useState<Store>(loadStore)
@@ -272,9 +284,6 @@ function TrackerApp() {
   const [historyHero, setHistoryHero] = useState('all')
   const [historyMonth, setHistoryMonth] = useState('all')
   const [historyMode, setHistoryMode] = useState<'all' | Mode>('all')
-  const [dashboardWinMode, setDashboardWinMode] = useState<Mode>('バトアリ')
-  const [dashboardWinLimit, setDashboardWinLimit] = useState<'all' | '10' | '20' | '50' | '100'>('all')
-  const [heroSearch, setHeroSearch] = useState('')
   const [heroRoleFilter, setHeroRoleFilter] = useState<'all' | Role>('all')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [recordSlide, setRecordSlide] = useState<1 | 2>(1)
@@ -282,7 +291,6 @@ function TrackerApp() {
   const [lockAlly2, setLockAlly2] = useState(false)
   const slideTouchStartX = useRef<number | null>(null)
   const importRef = useRef<HTMLInputElement>(null)
-  const heroSelectRef = useRef<HTMLSelectElement>(null)
   const [form, setForm] = useState({
     playedAt: nowLocalInput(), seasonEnabled: false, seasonLabel: store.activeSeason ?? seasonLabelFromDate(nowLocalInput()), mode: (store.lastMode ?? 'バトアリ') as Mode,
     heroName: [...store.matches].sort((a, b) => b.playedAt.localeCompare(a.playedAt))[0]?.heroName ?? '', mapName: store.maps[0] ?? '', result: 'win' as Result,
@@ -316,18 +324,14 @@ function TrackerApp() {
     return () => window.clearInterval(interval)
   }, [])
   const sortedMatches = useMemo(() => [...store.matches].sort((a, b) => b.playedAt.localeCompare(a.playedAt)), [store.matches])
-  const dashboardWinMatches = useMemo(() => {
-    const byMode = sortedMatches.filter(match => (match.mode ?? 'バトアリ') === dashboardWinMode)
-    return dashboardWinLimit === 'all' ? byMode : byMode.slice(0, Number(dashboardWinLimit))
-  }, [sortedMatches, dashboardWinMode, dashboardWinLimit])
-  const dashboardWins = dashboardWinMatches.filter(match => match.result === 'win').length
-  const dashboardLosses = dashboardWinMatches.filter(match => match.result === 'loss').length
-  const dashboardWinRate = percent(dashboardWins, dashboardWins + dashboardLosses)
+  const todayMatches = sortedMatches.filter(match => match.playedAt.slice(0, 10) === today())
+  const todayWins = todayMatches.filter(match => match.result === 'win').length
+  const todayLosses = todayMatches.filter(match => match.result === 'loss').length
+  const todayWinRate = percent(todayWins, todayWins + todayLosses)
+  const allWins = store.matches.filter(match => match.result === 'win').length
+  const allLosses = store.matches.filter(match => match.result === 'loss').length
+  const allTimeWinRate = percent(allWins, allWins + allLosses)
   const currentRankState = normalizeRankState(store.currentRankTier ?? 1, store.currentRankPoints ?? 0)
-  const currentMonth = today().slice(0, 7)
-  const currentMonthMatches = store.matches.filter(m => m.playedAt.slice(0, 7) === currentMonth)
-  const currentMonthWins = currentMonthMatches.filter(m => m.result === 'win').length
-  const currentMonthLosses = currentMonthMatches.filter(m => m.result === 'loss').length
   const currentStreak = useMemo(() => {
     const chronological = [...store.matches].sort((a, b) => b.playedAt.localeCompare(a.playedAt))
     const first = chronological[0]?.result
@@ -364,13 +368,11 @@ function TrackerApp() {
     return sortedMatches.filter(m => (historyResult === 'all' || m.result === historyResult) && (historyHero === 'all' || m.heroName === historyHero) && (historyMonth === 'all' || m.playedAt.startsWith(historyMonth)) && (historyMode === 'all' || (m.mode ?? 'バトアリ') === historyMode) && (!query || `${m.heroName} ${m.mapName} ${m.memo} ${m.season} ${m.mode ?? ''}`.toLocaleLowerCase().includes(query)))
   }, [sortedMatches, historyQuery, historyResult, historyHero, historyMonth, historyMode])
   const visibleHeroes = useMemo(() => {
-    const query = heroSearch.trim().toLocaleLowerCase()
-    const isFiltering = Boolean(query) || heroRoleFilter !== 'all' || favoritesOnly
+    const isFiltering = heroRoleFilter !== 'all' || favoritesOnly
     const lastUsedHeroName = sortedMatches[0]?.heroName
     return store.heroes
       .filter(hero => (heroRoleFilter === 'all' || hero.role === heroRoleFilter)
-        && (!favoritesOnly || Boolean(hero.favorite))
-        && (!query || hero.name.toLocaleLowerCase().includes(query)))
+        && (!favoritesOnly || Boolean(hero.favorite)))
       .sort((a, b) => {
         if (!isFiltering && lastUsedHeroName) {
           if (a.name === lastUsedHeroName) return -1
@@ -378,7 +380,7 @@ function TrackerApp() {
         }
         return (heroOrderIndex.get(a.name) ?? Number.MAX_SAFE_INTEGER) - (heroOrderIndex.get(b.name) ?? Number.MAX_SAFE_INTEGER)
       })
-  }, [store.heroes, heroSearch, heroRoleFilter, favoritesOnly, sortedMatches])
+  }, [store.heroes, heroRoleFilter, favoritesOnly, sortedMatches])
   const managedHeroes = useMemo(() => [...store.heroes].sort((a, b) =>
     roles.indexOf(a.role) - roles.indexOf(b.role)
     || (heroOrderIndex.get(a.name) ?? Number.MAX_SAFE_INTEGER) - (heroOrderIndex.get(b.name) ?? Number.MAX_SAFE_INTEGER)
@@ -387,30 +389,13 @@ function TrackerApp() {
   const teamHeroOptions = useMemo(() => [...store.heroes].sort((a, b) =>
     (heroOrderIndex.get(a.name) ?? Number.MAX_SAFE_INTEGER) - (heroOrderIndex.get(b.name) ?? Number.MAX_SAFE_INTEGER)
   ), [store.heroes])
-  function openHeroSelect() {
-    const select = heroSelectRef.current as (HTMLSelectElement & { showPicker?: () => void }) | null
-    if (!select) return
-    try { if (select.showPicker) select.showPicker(); else { select.focus(); select.click() } }
-    catch { select.focus(); select.click() }
-  }
-  function handleHeroSearch(value: string) {
-    setHeroSearch(value)
-    const query = value.trim().toLocaleLowerCase()
-    const matches = store.heroes.filter(hero => (heroRoleFilter === 'all' || hero.role === heroRoleFilter)
-      && (!favoritesOnly || Boolean(hero.favorite))
-      && Boolean(query) && hero.name.toLocaleLowerCase().includes(query))
-    setForm(old => ({ ...old, heroName: matches.length === 1 ? matches[0].name : '' }))
-    if (matches.length !== 1) openHeroSelect()
-  }
   function changeHeroRoleFilter(role: 'all' | Role) {
     setHeroRoleFilter(role)
     setForm(old => ({ ...old, heroName: '' }))
-    openHeroSelect()
   }
   function changeFavoritesOnly(checked: boolean) {
     setFavoritesOnly(checked)
     setForm(old => ({ ...old, heroName: '' }))
-    openHeroSelect()
   }
   function toggleFavorite(name: string) {
     setStore(current => ({ ...current, heroes: current.heroes.map(hero => hero.name === name ? { ...hero, favorite: !hero.favorite } : hero) }))
@@ -427,7 +412,6 @@ function TrackerApp() {
   function notify(message: string) { setToast(message); window.setTimeout(() => setToast(''), 2600) }
   function startNewMatch() {
     setEditingId(null)
-    setHeroSearch('')
     setHeroRoleFilter('all')
     setFavoritesOnly(false)
     setRecordSlide(1)
@@ -439,7 +423,6 @@ function TrackerApp() {
   function beginEditMatch(match: Match) {
     setRecordSlide(1)
     setEditingId(match.id)
-    setHeroSearch('')
     setHeroRoleFilter('all')
     setFavoritesOnly(false)
     setForm({ playedAt: normalizeDateTime(match.playedAt), seasonEnabled: Boolean(match.season) && (match.mode ?? 'バトアリ') === 'バトアリ', seasonLabel: match.season || store.activeSeason || seasonLabelFromDate(nowLocalInput()), mode: match.mode ?? 'バトアリ', heroName: match.heroName, mapName: match.mapName, result: match.result, rankDirection: (match.rankChange ?? (match.result === 'loss' ? -1 : 1)) < 0 ? 'minus' : 'plus', rankDelta: String(Math.abs(match.rankChange ?? 0)), memo: match.memo ?? '', enemyHeroNames: [...(match.enemyHeroNames ?? []), '', '', ''].slice(0, 3), allyHeroNames: [...(match.allyHeroNames ?? []), '', ''].slice(0, 2) })
@@ -518,8 +501,7 @@ function TrackerApp() {
       setPage('dashboard')
     } else {
       const nextDate = nowLocalInput()
-      setHeroSearch('')
-      setHeroRoleFilter('all')
+        setHeroRoleFilter('all')
       setFavoritesOnly(false)
       setForm(old => ({ playedAt: nextDate, seasonEnabled: old.mode === 'バトアリ' ? old.seasonEnabled : false,
         seasonLabel: storeRef.current.activeSeason ?? seasonLabelFromDate(nextDate), mode: old.mode, heroName: hero.name,
@@ -564,6 +546,27 @@ function TrackerApp() {
     setStore(s => ({ ...s, heroes: [...s.heroes, { name, role: heroRoleDraft }] }))
     setHeroDraft(''); notify('ヒーローを追加しました')
   }
+  function editHeroAliases(hero: Hero) {
+    const answer = window.prompt(
+      `${hero.name} の略称を入力してください。複数ある場合は「,」または「、」で区切ります。
+空欄で保存すると略称を削除します。`,
+      (hero.aliases ?? []).join(', '),
+    )
+    if (answer === null) return
+    const seen = new Set<string>()
+    const aliases = answer.split(/[,、，]/).map(value => value.trim()).filter(value => {
+      const normalized = normalizeHeroSearchText(value)
+      if (!normalized || normalized === normalizeHeroSearchText(hero.name) || seen.has(normalized)) return false
+      seen.add(normalized)
+      return true
+    })
+    setStore(current => ({
+      ...current,
+      heroes: current.heroes.map(item => item.name === hero.name ? { ...item, aliases: aliases.length ? aliases : undefined } : item),
+    }))
+    notify(aliases.length ? `${hero.name} の略称を保存しました` : `${hero.name} の略称を削除しました`)
+  }
+
   function addMap() {
     const name = mapDraft.trim()
     if (!name) return
@@ -600,18 +603,11 @@ function TrackerApp() {
       </header>
 
       {page === 'dashboard' && <section className="page-stack">
-        <div className="stats-grid">
-          <StatCard icon={<Activity size={19}/>} label="総試合数" value={`${store.matches.length}`} sub="記録した試合" />
-          <div className="stat-card win-rate-stat-card">
-            <div className="stat-top"><span>勝率</span><span className="stat-icon"><Trophy size={19}/></span></div>
-            <div className="win-rate-tabs" role="group" aria-label="勝率のモード">
-              {(['フリバ', 'バトアリ'] as Mode[]).map(mode => <button type="button" key={mode} className={`win-rate-tab ${dashboardWinMode === mode ? 'active' : ''}`} aria-pressed={dashboardWinMode === mode} onClick={() => setDashboardWinMode(mode)}>{mode}</button>)}
-            </div>
-            <strong>{dashboardWinRate}</strong>
-            <div className="win-rate-footer"><small>{dashboardWins}勝 · {dashboardLosses}敗</small><select aria-label="勝率の集計対象試合数" className="win-rate-limit" value={dashboardWinLimit} onChange={e => setDashboardWinLimit(e.target.value as 'all' | '10' | '20' | '50' | '100')}><option value="all">全試合</option><option value="10">直近10戦</option><option value="20">直近20戦</option><option value="50">直近50戦</option><option value="100">直近100戦</option></select></div>
-          </div>
+        <div className="stats-grid dashboard-stats-grid">
           <div className="stat-card current-rank-stat-card"><div className="stat-top"><span>現在のランク</span><span className="stat-icon"><BarChart3 size={19}/></span></div><strong>{`S${currentRankState.tier} · ${currentRankState.points}pt`}</strong><small>{store.activeSeason ?? 'シーズン未設定'}</small></div>
-          <StatCard icon={<CalendarDays size={19}/>} label="今月の試合" value={`${currentMonthMatches.length}`} sub={`${currentMonthWins}勝 · ${currentMonthLosses}敗`} />
+          <StatCard icon={<Trophy size={19}/>} label="今日の勝率" value={todayWinRate} sub={`${todayWins}勝 · ${todayLosses}敗`} />
+          <StatCard icon={<Trophy size={19}/>} label="全体勝率" value={allTimeWinRate} sub={`${allWins}勝 · ${allLosses}敗`} />
+          <StatCard icon={<CalendarDays size={19}/>} label="総試合数" value={`${store.matches.length}`} sub="記録した試合" />
           <StatCard icon={<Activity size={19}/>} label="現在の連続結果" value={currentStreak.count ? `${currentStreak.count}${currentStreak.result}` : '—'} sub={`最高連勝：${highestWinStreak}`} />
         </div>
         <div className="content-card">
@@ -647,15 +643,14 @@ function TrackerApp() {
             </div>
 
           </div>
-          <div className="field field-wide hero-picker-controls">
-            <div className="hero-search-control"><label>使用ヒーローを検索</label><label className="search-field"><Search size={16}/><input value={heroSearch} onChange={e => handleHeroSearch(e.target.value)} placeholder="ヒーロー名を入力" /></label></div>
+          <div className="field field-wide hero-picker-controls hero-picker-filters-only">
             <div className="hero-filter-control"><label>絞込み</label>
               <div className="hero-role-buttons">{(['all', ...roles] as ('all' | Role)[]).map(role => <button type="button" key={role} className={`role-filter-button ${heroRoleFilter === role ? 'active' : ''}`} onClick={() => changeHeroRoleFilter(role)}>{role === 'all' ? 'すべて' : role}</button>)}</div>
               <label className="favorite-filter"><input type="checkbox" checked={favoritesOnly} onChange={e => changeFavoritesOnly(e.target.checked)}/><span><Star size={13}/> お気に入り</span></label>
             </div>
           </div>
           <div className="field field-wide hero-select-field"><label>使用ヒーロー（{visibleHeroes.length}人）</label>
-            <div className="hero-select-row"><select ref={heroSelectRef} className="hero-select" required={recordSlide === 1} value={form.heroName} onChange={e => setForm({ ...form, heroName: e.target.value })}><option value="">—</option>{visibleHeroes.map(h => <option key={h.name} value={h.name}>{h.name}</option>)}</select>
+            <div className="hero-select-row"><SearchableHeroDropdown value={form.heroName} heroes={visibleHeroes} onChange={name => setForm(old => ({ ...old, heroName: name }))} placeholder="ヒーローを検索・選択" />
               <button type="button" className={`favorite-toggle ${selectedHero?.favorite ? 'is-favorite' : ''}`} disabled={!selectedHero} aria-label={selectedHero?.favorite ? 'お気に入りを解除' : 'お気に入りに登録'} aria-pressed={Boolean(selectedHero?.favorite)} title={selectedHero?.favorite ? 'お気に入りを解除' : 'お気に入りに登録'} onClick={() => selectedHero && toggleFavorite(selectedHero.name)}><Star size={18} fill={selectedHero?.favorite ? 'currentColor' : 'none'}/></button>
             </div>
             {visibleHeroes.length === 0 && <small className="small-note">条件に一致するヒーローがいません。検索や絞込みを変更してください。</small>}
@@ -668,9 +663,12 @@ function TrackerApp() {
             <div className="rp-change-control"><div className="rp-direction-buttons"><button type="button" className={`result-choice ${form.rankDirection === 'plus' ? 'selected win' : ''}`} onClick={() => setForm({ ...form, rankDirection: 'plus' })}><Plus size={16}/> 増加</button><button type="button" className={`result-choice ${form.rankDirection === 'minus' ? 'selected loss' : ''}`} onClick={() => setForm({ ...form, rankDirection: 'minus' })}><Minus size={16}/> 減少</button></div><input aria-label="RP変動量" type="number" min="0" step="1" placeholder="0" value={form.rankDelta} onChange={e => setForm({ ...form, rankDelta: e.target.value })}/><strong className={form.result === 'draw' ? '' : form.rankDirection === 'minus' ? 'negative-rp' : 'positive-rp'}>{form.result === 'draw' ? '±0' : form.rankDirection === 'minus' ? `−${Math.abs(Number(form.rankDelta) || 0).toLocaleString()}` : `+${Math.abs(Number(form.rankDelta) || 0).toLocaleString()}`}</strong></div>
             <small className="small-note">試合後の予測ランク：{(() => { const before = normalizeRankState(Number(rankTierDraft) || currentRankState.tier, Number(rankPointsDraft) || 0); const delta = form.result === 'draw' ? 0 : (form.rankDirection === 'minus' ? -1 : 1) * Math.abs(Number(form.rankDelta) || 0); return formatRankState(applyRankChange(before, delta)) })()}</small>
           </div> : <div className="field field-wide freeba-rank-note"><strong>{form.mode}ではランクポイントは変動しません。</strong><span>現在のランクは記録・確認のみ行います。</span></div>}
-          <div className="record-slide-nav" aria-label="記録ページの移動">
+          <div className="record-slide-nav primary-slide-nav" aria-label="記録ページの移動">
             <div className="record-slide-steps"><span className="record-slide-step active">1 基本情報</span><span className="record-slide-step">2 チーム構成</span></div>
-            <button type="button" className="secondary-button" onClick={() => setRecordSlide(2)}>次へ：チーム構成 →</button>
+            <div className="record-slide-actions">
+              <button type="submit" className="primary-button">{editingId ? <><Pencil size={17}/> 変更を保存</> : <><Plus size={17}/> 記録を保存</>}</button>
+              <button type="button" className="secondary-button" onClick={() => setRecordSlide(2)}>次へ：チーム構成 →</button>
+            </div>
           </div>
           </div><div className="match-slide match-slide-teams">
           <div className="record-slide-nav team-page-nav" aria-label="記録ページの移動">
@@ -685,7 +683,7 @@ function TrackerApp() {
                 {Array.from({ length: 2 }, (_, index) => {
                   const locked = index === 0 ? lockAlly1 : lockAlly2
                   const toggleLock = () => index === 0 ? setLockAlly1(value => !value) : setLockAlly2(value => !value)
-                  return <label key={`ally-${index}`}><span>味方 {index + 1}</span><div className="team-select-with-lock"><select value={form.allyHeroNames[index] ?? ''} onChange={e => setTeamHero('allyHeroNames', index, e.target.value)}><option value="">— 未選択 —</option>{teamHeroOptions.map(hero => <option key={hero.name} value={hero.name}>{hero.name}</option>)}</select><button type="button" className={`ally-lock-toggle ally-slot-lock ${locked ? 'locked' : ''}`} aria-label={locked ? `味方${index + 1}の固定を解除` : `味方${index + 1}を固定`} aria-pressed={locked} title={locked ? `味方${index + 1}は固定中` : `味方${index + 1}を固定`} onClick={toggleLock}>{locked ? <Lock size={16}/> : <Unlock size={16}/>}</button></div></label>
+                  return <label key={`ally-${index}`}><span>味方 {index + 1}</span><div className="team-select-with-lock"><SearchableHeroDropdown value={form.allyHeroNames[index] ?? ''} heroes={teamHeroOptions} onChange={name => setTeamHero('allyHeroNames', index, name)} placeholder="— 未選択 —" /><button type="button" className={`ally-lock-toggle ally-slot-lock ${locked ? 'locked' : ''}`} aria-label={locked ? `味方${index + 1}の固定を解除` : `味方${index + 1}を固定`} aria-pressed={locked} title={locked ? `味方${index + 1}は固定中` : `味方${index + 1}を固定`} onClick={toggleLock}>{locked ? <Lock size={16}/> : <Unlock size={16}/>}</button></div></label>
                 })}
               </div>
               <p className="team-lock-help">{lockAlly1 && lockAlly2 ? '味方1・2を固定中です。' : lockAlly1 ? '味方1を固定中です。味方2は記録後にリセットされます。' : lockAlly2 ? '味方2を固定中です。味方1は記録後にリセットされます。' : 'ロックした味方だけ、記録後も選択を保持します。'}</p>
@@ -693,7 +691,7 @@ function TrackerApp() {
             <section className="team-composition-side">
               <div className="team-side-header"><h4>敵チーム <small>任意・最大3人</small></h4></div>
               <div className="team-select-list">
-                {Array.from({ length: 3 }, (_, index) => <label key={`enemy-${index}`}><span>敵 {index + 1}</span><select value={form.enemyHeroNames[index] ?? ''} onChange={e => setTeamHero('enemyHeroNames', index, e.target.value)}><option value="">— 未選択 —</option>{teamHeroOptions.map(hero => <option key={hero.name} value={hero.name}>{hero.name}</option>)}</select></label>)}
+                {Array.from({ length: 3 }, (_, index) => <label key={`enemy-${index}`}><span>敵 {index + 1}</span><SearchableHeroDropdown value={form.enemyHeroNames[index] ?? ''} heroes={teamHeroOptions} onChange={name => setTeamHero('enemyHeroNames', index, name)} placeholder="— 未選択 —" /></label>)}
               </div>
             </section>
           </div>
@@ -724,7 +722,7 @@ function TrackerApp() {
         <div className="content-card">
           <div className="section-heading"><div><h3>ヒーロー管理</h3><p>名前とロールを追加できます。削除は試合記録で未使用の場合のみ可能です。</p></div></div>
           <div className="catalog-add"><input value={heroDraft} placeholder="ヒーロー名" onChange={e => setHeroDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addHero())}/><select value={heroRoleDraft} onChange={e => setHeroRoleDraft(e.target.value as Role)}>{roles.map(r => <option key={r}>{r}</option>)}</select><button className="primary-button" onClick={addHero}><Plus size={16}/> 追加</button></div>
-          <div className="catalog-list">{managedHeroes.map(h => <div className="catalog-item" key={h.name}><span>{h.name}</span><span className={`role-pill role-${roles.indexOf(h.role)}`}>{h.role}</span><button className="icon-button" aria-label={`${h.name}を削除`} onClick={() => removeHero(h.name)}><Trash2 size={16}/></button></div>)}</div>
+          <div className="catalog-list">{managedHeroes.map(h => <div className="catalog-item hero-catalog-item" key={h.name}><span className="hero-catalog-name">{h.name}{h.aliases?.length ? <small className="hero-alias-summary">略称：{h.aliases.join('、')}</small> : null}</span><span className={`role-pill role-${roles.indexOf(h.role)}`}>{h.role}</span><button className="icon-button alias-edit-button" aria-label={`${h.name}の略称を設定`} title="略称を設定・編集" onClick={() => editHeroAliases(h)}><Pencil size={15}/></button><button className="icon-button" aria-label={`${h.name}を削除`} onClick={() => removeHero(h.name)}><Trash2 size={16}/></button></div>)}</div>
         </div>
         <div className="content-card">
           <div className="section-heading"><div><h3>マップ管理</h3><p>マップを追加できます。削除は試合記録で未使用の場合のみ可能です。</p></div></div>
@@ -736,6 +734,46 @@ function TrackerApp() {
       <footer className="app-footer">コンパス戦績ノート <span>·</span> Version 0.2.0</footer>
     </main>
     {toast && <div className="toast"><span className="toast-dot"/>{toast}<button onClick={() => setToast('')} aria-label="閉じる"><X size={15}/></button></div>}
+  </div>
+}
+
+function SearchableHeroDropdown({ value, heroes, onChange, placeholder }: { value: string; heroes: Hero[]; onChange: (name: string) => void; placeholder: string }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const filteredHeroes = useMemo(() => heroes.filter(hero => heroMatchesSearch(hero, query)), [heroes, query])
+  const selectedHero = heroes.find(hero => hero.name === value)
+  function chooseHero(name: string) {
+    onChange(name)
+    setQuery('')
+    setOpen(false)
+  }
+  return <div className="hero-search-dropdown" onBlur={event => {
+    const nextTarget = event.relatedTarget as Node | null
+    if (!nextTarget || !event.currentTarget.contains(nextTarget)) setOpen(false)
+  }}>
+    <button type="button" className="hero-search-dropdown-trigger" aria-haspopup="listbox" aria-expanded={open} onClick={() => {
+      if (!open) setQuery('')
+      setOpen(current => !current)
+    }}>
+      <span className={selectedHero ? '' : 'hero-search-dropdown-placeholder'}>{selectedHero?.name ?? placeholder}</span>
+      <ChevronDown size={16}/>
+    </button>
+    {open && <div className="hero-search-dropdown-menu">
+      <label className="hero-search-dropdown-query"><Search size={15}/><input autoFocus value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => {
+        if (event.key === 'Escape') { event.preventDefault(); setOpen(false) }
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          if (filteredHeroes.length === 1) chooseHero(filteredHeroes[0].name)
+        }
+      }} placeholder="ヒーロー名・略称で検索" /></label>
+      <div className="hero-search-dropdown-options" role="listbox" aria-label="ヒーロー候補">
+        <button type="button" role="option" aria-selected={!value} className={!value ? 'selected' : ''} onClick={() => chooseHero('')}><span>{placeholder}</span></button>
+        {filteredHeroes.map(hero => <button type="button" role="option" aria-selected={value === hero.name} className={value === hero.name ? 'selected' : ''} key={hero.name} onClick={() => chooseHero(hero.name)}>
+          <span>{hero.name}</span>{hero.aliases?.length ? <small>{hero.aliases.join('、')}</small> : null}
+        </button>)}
+        {filteredHeroes.length === 0 && <p className="hero-search-dropdown-empty">該当するヒーローがいません。略称も検索できます。</p>}
+      </div>
+    </div>}
   </div>
 }
 

@@ -211,3 +211,66 @@ html[data-theme="light"] .ally-slot-lock.locked { background: #def8fa; color: #0
   .record-current-rank > strong { font-size: 24px; }
   .mode-selection-only { max-width: none; }
 }
+
+/* Dashboard order: 1 2 / 3 4 / 5 */
+.dashboard-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dashboard-stats-grid > .stat-card:last-child { grid-column: 1 / -1; }
+
+/* Keep the hero filters compact; the search field appears only after opening a picker. */
+.hero-picker-controls.hero-picker-filters-only { grid-template-columns: minmax(0, 1fr); }
+.hero-select-row .hero-search-dropdown { flex: 1 1 auto; min-width: 0; }
+.hero-search-dropdown { position: relative; width: 100%; min-width: 0; }
+html[data-theme] .hero-search-dropdown-trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; min-width: 0; min-height: 40px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised);
+  color: var(--text-main); text-align: left; font-size: 11px; cursor: pointer;
+}
+.hero-search-dropdown-trigger > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-theme] .hero-search-dropdown-trigger:hover,
+html[data-theme] .hero-search-dropdown-trigger:focus-visible { border-color: var(--accent-strong); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+.hero-search-dropdown-placeholder { color: var(--text-muted); }
+.hero-search-dropdown-menu {
+  position: absolute; z-index: 50; top: calc(100% + 5px); left: 0; right: 0;
+  min-width: min(100%, 280px); padding: 8px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); box-shadow: 0 14px 38px var(--shadow); color: var(--text-main);
+}
+.hero-search-dropdown-query {
+  display: flex; align-items: center; gap: 8px; padding: 0 9px; margin-bottom: 7px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--surface-raised); color: var(--text-muted);
+}
+html[data-theme] .hero-search-dropdown-query input {
+  min-width: 0; width: 100%; padding: 10px 0; border: 0; border-radius: 0;
+  outline: none; box-shadow: none; background: transparent; color: var(--text-main); font-size: 11px;
+}
+html[data-theme] .hero-search-dropdown-query input:focus { border: 0 !important; box-shadow: none !important; }
+.hero-search-dropdown-options { max-height: 230px; overflow: auto; overscroll-behavior: contain; display: grid; gap: 2px; }
+html[data-theme] .hero-search-dropdown-options > button {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0;
+  padding: 9px 10px; border: 1px solid transparent; border-radius: 6px; background: transparent;
+  color: var(--text-main); text-align: left; font-size: 11px; cursor: pointer;
+}
+html[data-theme] .hero-search-dropdown-options > button:hover,
+html[data-theme] .hero-search-dropdown-options > button:focus-visible { outline: none; border-color: var(--accent-line); background: var(--accent-soft); }
+html[data-theme] .hero-search-dropdown-options > button.selected { color: var(--accent-strong); background: var(--accent-soft); }
+.hero-search-dropdown-options > button > span { overflow-wrap: anywhere; }
+.hero-search-dropdown-options > button small { flex: 0 1 45%; color: var(--text-muted); font-size: 9px; text-align: right; overflow-wrap: anywhere; }
+.hero-search-dropdown-empty { margin: 0; padding: 12px 10px; color: var(--text-muted); font-size: 10px; line-height: 1.7; }
+
+/* Per-hero aliases stay editable without adding permanent controls to the main recorder. */
+.hero-catalog-item { gap: 7px; }
+.hero-catalog-name { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
+.hero-alias-summary { display: block; margin-top: 3px; color: var(--text-muted); font-size: 9px; line-height: 1.4; }
+.hero-catalog-item .alias-edit-button { flex-shrink: 0; }
+
+/* Save is available from the first slide as well as the team-composition slide. */
+.primary-slide-nav { align-items: center; }
+.record-slide-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 700px) {
+  .dashboard-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-stats-grid > .stat-card:last-child { grid-column: 1 / -1; }
+  .record-slide-actions { width: 100%; justify-content: stretch; }
+  .record-slide-actions > button { flex: 1 1 auto; }
+  .hero-search-dropdown-menu { min-width: 0; }
+}
+
