@@ -11,6 +11,10 @@ type Role = 'アタッカー' | 'ガンナー' | 'タンク' | 'スプリンタ�
 type Result = 'win' | 'loss' | 'draw'
 type Mode = 'バトアリ' | 'フリバ' | 'カスタム'
 type Hero = { name: string; role: Role; favorite?: boolean; aliases?: string[] }
+type HeroBaseStat = { battles: number; wins: number }
+type HeroDetailSection = 'map' | 'ally' | 'enemy'
+type HeroDetailSortKey = 'battles' | 'wins' | 'winRate'
+type HeroDetailRow = { name: string; battles: number; wins: number; winRate: number | null; order: number }
 type Match = {
   id: string
   playedAt: string
@@ -57,8 +61,10 @@ type Store = {
   lastSeasonResetMonth?: string
   /** バトアリのステージローテーション。日付ごとに4ステージを保存し、別月へ流用しない */
   stageRotations?: Record<string, string[]>
+  /** アプリ導入前の累計試合数・勝ち数。アプリ内記録分と合算して表示 */
+  heroBaseStats?: Record<string, HeroBaseStat>
 }
-type Page = 'dashboard' | 'add' | 'history' | 'settings'
+type Page = 'dashboard' | 'add' | 'history' | 'settings' | 'heroStats' | 'heroDetail'
 type CloudContextValue = { saveCloudStore: (store: Store) => void; syncStatus: string }
 const CloudContext = createContext<CloudContextValue | null>(null)
 const appLastUpdatedAt = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(__APP_BUILD_AT__))
@@ -163,6 +169,7 @@ type RecordDraft = {
   rankTierDraft?: string
   rankPointsDraft?: string
   form?: Record<string, any>
+  selectedHeroDetailName?: string
 }
 function loadRecordDraft(): RecordDraft | null {
   try {
@@ -273,6 +280,17 @@ function normalizeStore(input: Partial<Store> | null | undefined): Store {
   const resetMonth = typeof input?.lastSeasonResetMonth === 'string' && /^\d{4}-\d{2}$/.test(input.lastSeasonResetMonth)
     ? input.lastSeasonResetMonth
     : previousMonthKey()
+  const heroBaseStats: Record<string, HeroBaseStat> = {}
+  if (input?.heroBaseStats && typeof input.heroBaseStats === 'object' && !Array.isArray(input.heroBaseStats)) {
+    Object.entries(input.heroBaseStats).forEach(([name, value]) => {
+      if (!value || typeof value !== 'object') return
+      const rawBattles = Number(value.battles)
+      const rawWins = Number(value.wins)
+      const battles = Number.isFinite(rawBattles) ? Math.max(0, Math.floor(rawBattles)) : 0
+      const wins = Number.isFinite(rawWins) ? Math.min(battles, Math.max(0, Math.floor(rawWins))) : 0
+      heroBaseStats[name] = { battles, wins }
+    })
+  }
   const stageRotations: Record<string, string[]> = {}
   if (input?.stageRotations && typeof input.stageRotations === 'object' && !Array.isArray(input.stageRotations)) {
     Object.entries(input.stageRotations).forEach(([date, names]) => {
@@ -292,7 +310,7 @@ function normalizeStore(input: Partial<Store> | null | undefined): Store {
     lastLockedAllySlots: Array.isArray(input?.lastLockedAllySlots)
       ? [Boolean(input.lastLockedAllySlots[0]), Boolean(input.lastLockedAllySlots[1])] : [false, false],
     currentRankTier: inferredRank.tier, currentRankPoints: inferredRank.points,
-    activeSeason, lastSeasonResetMonth: resetMonth, stageRotations
+    activeSeason, lastSeasonResetMonth: resetMonth, stageRotations, heroBaseStats
   }
 }
 function loadStore(): Store {
@@ -366,7 +384,7 @@ function TrackerApp() {
   const [rankTierDraft, setRankTierDraft] = useState(savedDraft?.rankTierDraft ?? String(store.currentRankTier ?? 1))
   const [rankPointsDraft, setRankPointsDraft] = useState(savedDraft?.rankPointsDraft ?? String(store.currentRankPoints ?? 0))
   const [page, setPage] = useState<Page>(() =>
-    ['dashboard', 'add', 'history', 'settings'].includes(savedDraft?.page ?? '') ? savedDraft!.page! : 'dashboard'
+    ['dashboard', 'add', 'history', 'settings', 'heroStats', 'heroDetail'].includes(savedDraft?.page ?? '') ? savedDraft!.page! : 'dashboard'
   )
   const [toast, setToast] = useState('')
   const [editingId, setEditingId] = useState<string | null>(() => savedDraft?.editingId ?? null)
@@ -375,6 +393,13 @@ function TrackerApp() {
   const [historyHero, setHistoryHero] = useState('all')
   const [historyMonth, setHistoryMonth] = useState('all')
   const [historyMode, setHistoryMode] = useState<'all' | Mode>('all')
+  const [selectedHeroDetailName, setSelectedHeroDetailName] = useState(savedDraft?.selectedHeroDetailName ?? '')
+  const [heroBaseDrafts, setHeroBaseDrafts] = useState<Record<string, { battles: string; wins: string }>>({})
+  const [heroDetailMode, setHeroDetailMode] = useState<'all' | Mode>('all')
+  const [heroDetailRecentCount, setHeroDetailRecentCount] = useState<'all' | '10' | '30' | '50' | '100'>('all')
+  const [heroDetailSection, setHeroDetailSection] = useState<HeroDetailSection>('map')
+  const [heroDetailSortKey, setHeroDetailSortKey] = useState<HeroDetailSortKey>('winRate')
+  const [heroDetailSortDirection, setHeroDetailSortDirection] = useState<'asc' | 'desc'>('desc')
   const [heroRoleFilter, setHeroRoleFilter] = useState<'all' | Role>('all')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [recordSlide, setRecordSlide] = useState<1 | 2>(() => savedDraft?.recordSlide === 2 ? 2 : 1)
@@ -418,10 +443,10 @@ function TrackerApp() {
   useEffect(() => {
     try {
       localStorage.setItem(recordDraftStorageKey, JSON.stringify({
-        page, form, editingId, recordSlide, lockAlly1, lockAlly2, rankTierDraft, rankPointsDraft
+        page, form, editingId, recordSlide, lockAlly1, lockAlly2, rankTierDraft, rankPointsDraft, selectedHeroDetailName
       }))
     } catch { /* localStorage が利用できない環境では下書き保存を省略 */ }
-  }, [page, form, editingId, recordSlide, lockAlly1, lockAlly2, rankTierDraft, rankPointsDraft])
+  }, [page, form, editingId, recordSlide, lockAlly1, lockAlly2, rankTierDraft, rankPointsDraft, selectedHeroDetailName])
   useEffect(() => {
     const checkAutomaticSeasonReset = () => {
       const current = storeRef.current
@@ -482,6 +507,47 @@ function TrackerApp() {
     return [...buckets.entries()].map(([name, matches]) => ({ name, role: matches[0].heroRole, total: matches.length, wins: matches.filter(m => m.result === 'win').length, losses: matches.filter(m => m.result === 'loss').length, draws: matches.filter(m => m.result === 'draw').length, rate: percent(matches.filter(m => m.result === 'win').length, matches.filter(m => m.result !== 'draw').length) })).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'ja'))
   }, [store.matches])
   const availableMonths = useMemo(() => [...new Set(store.matches.map(m => m.playedAt.slice(0, 7)))].sort((a, b) => b.localeCompare(a)), [store.matches])
+  const heroSummaryRows = useMemo(() => store.heroes.map(hero => {
+    const base = store.heroBaseStats?.[hero.name] ?? { battles: 0, wins: 0 }
+    const recorded = store.matches.filter(match => match.heroName === hero.name)
+    const battles = base.battles + recorded.length
+    const wins = base.wins + recorded.filter(match => match.result === 'win').length
+    return { ...hero, baseBattles: base.battles, baseWins: base.wins, totalBattles: battles, totalWins: wins, winRate: battles > 0 ? wins / battles * 100 : null }
+  }).sort((a, b) => (heroOrderIndex.get(a.name) ?? Number.MAX_SAFE_INTEGER) - (heroOrderIndex.get(b.name) ?? Number.MAX_SAFE_INTEGER)), [store.heroes, store.heroBaseStats, store.matches])
+  const selectedHeroDetail = store.heroes.find(hero => hero.name === selectedHeroDetailName)
+  const selectedHeroDetailRecords = useMemo(() => {
+    let records = store.matches.filter(match => match.heroName === selectedHeroDetailName && (heroDetailMode === 'all' || (match.mode ?? 'バトアリ') === heroDetailMode))
+      .sort((a, b) => b.playedAt.localeCompare(a.playedAt))
+    if (heroDetailRecentCount !== 'all') records = records.slice(0, Number(heroDetailRecentCount))
+    return records
+  }, [store.matches, selectedHeroDetailName, heroDetailMode, heroDetailRecentCount])
+  const heroDetailRows = useMemo<HeroDetailRow[]>(() => {
+    let names: string[]
+    if (heroDetailSection === 'map') {
+      names = [...new Set([...store.maps, ...selectedHeroDetailRecords.map(match => match.mapName)])]
+    } else {
+      const teamNames = selectedHeroDetailRecords.flatMap(match => heroDetailSection === 'ally' ? (match.allyHeroNames ?? []) : (match.enemyHeroNames ?? []))
+      names = [...new Set([...store.heroes.map(hero => hero.name), ...teamNames.filter(Boolean)])]
+        .sort((a, b) => (heroOrderIndex.get(a) ?? Number.MAX_SAFE_INTEGER) - (heroOrderIndex.get(b) ?? Number.MAX_SAFE_INTEGER) || a.localeCompare(b, 'ja'))
+    }
+    const rows = names.map((name, order) => {
+      const related = selectedHeroDetailRecords.filter(match => heroDetailSection === 'map'
+        ? match.mapName === name
+        : (heroDetailSection === 'ally' ? (match.allyHeroNames ?? []) : (match.enemyHeroNames ?? [])).includes(name))
+      const battles = related.length
+      const wins = related.filter(match => match.result === 'win').length
+      return { name, battles, wins, winRate: battles > 0 ? wins / battles * 100 : null, order }
+    })
+    return rows.sort((a, b) => {
+      if (a.battles === 0 && b.battles > 0) return 1
+      if (a.battles > 0 && b.battles === 0) return -1
+      if (a.battles === 0 && b.battles === 0) return a.order - b.order
+      const aValue = heroDetailSortKey === 'winRate' ? (a.winRate ?? 0) : heroDetailSortKey === 'wins' ? a.wins : a.battles
+      const bValue = heroDetailSortKey === 'winRate' ? (b.winRate ?? 0) : heroDetailSortKey === 'wins' ? b.wins : b.battles
+      const difference = aValue - bValue
+      return (heroDetailSortDirection === 'desc' ? -difference : difference) || a.order - b.order
+    })
+  }, [store.maps, store.heroes, selectedHeroDetailRecords, heroDetailSection, heroDetailSortKey, heroDetailSortDirection])
   const filteredMatches = useMemo(() => {
     const query = historyQuery.trim().toLocaleLowerCase()
     return sortedMatches.filter(m => (historyResult === 'all' || m.result === historyResult) && (historyHero === 'all' || m.heroName === historyHero) && (historyMonth === 'all' || m.playedAt.startsWith(historyMonth)) && (historyMode === 'all' || (m.mode ?? 'バトアリ') === historyMode) && (!query || `${m.heroName} ${m.mapName} ${m.memo} ${m.season} ${m.mode ?? ''}`.toLocaleLowerCase().includes(query)))
@@ -665,6 +731,44 @@ function TrackerApp() {
     if (!window.confirm('この試合記録を削除しますか？')) return
     setStore(s => ({ ...s, matches: s.matches.filter(m => m.id !== id) }))
   }
+  function updateHeroBaseDraft(name: string, field: 'battles' | 'wins', value: string) {
+    const base = store.heroBaseStats?.[name] ?? { battles: 0, wins: 0 }
+    setHeroBaseDrafts(current => ({
+      ...current,
+      [name]: {
+        battles: current[name]?.battles ?? String(base.battles),
+        wins: current[name]?.wins ?? String(base.wins),
+        [field]: value
+      }
+    }))
+  }
+  function saveHeroBaseStats(name: string) {
+    const base = storeRef.current.heroBaseStats?.[name] ?? { battles: 0, wins: 0 }
+    const draft = heroBaseDrafts[name] ?? { battles: String(base.battles), wins: String(base.wins) }
+    const battles = Number(draft.battles)
+    const wins = Number(draft.wins)
+    if (!Number.isInteger(battles) || battles < 0 || !Number.isInteger(wins) || wins < 0 || wins > battles) {
+      notify('試合数・勝ち数は0以上の整数で、勝ち数は試合数以下にしてください')
+      return
+    }
+    const heroBaseStats = { ...(storeRef.current.heroBaseStats ?? {}) }
+    if (battles === 0 && wins === 0) delete heroBaseStats[name]
+    else heroBaseStats[name] = { battles, wins }
+    const updated: Store = { ...storeRef.current, heroBaseStats }
+    storeRef.current = updated
+    setStore(updated)
+    setHeroBaseDrafts(current => ({ ...current, [name]: { battles: String(battles), wins: String(wins) } }))
+    notify(`${name} の過去分データを保存しました`)
+  }
+  function openHeroDetail(name: string) {
+    setSelectedHeroDetailName(name)
+    setHeroDetailMode('all')
+    setHeroDetailRecentCount('all')
+    setHeroDetailSection('map')
+    setHeroDetailSortKey('winRate')
+    setHeroDetailSortDirection('desc')
+    setPage('heroDetail')
+  }
   function exportData() {
     const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), ...store }, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -827,13 +931,14 @@ ${result.data.text ?? ''}`)
         <NavItem active={page === 'dashboard'} icon={<Gauge size={18}/>} label="ホーム" onClick={() => setPage('dashboard')} />
         <NavItem active={page === 'add'} icon={<Plus size={18}/>} label="試合を記録" onClick={startNewMatch} />
         <NavItem active={page === 'history'} icon={<History size={18}/>} label="戦績一覧" onClick={() => setPage('history')} />
+        <NavItem active={page === 'heroStats' || page === 'heroDetail'} icon={<Trophy size={18}/>} label="ヒーロー詳細ログ" onClick={() => setPage('heroStats')} />
         <NavItem active={page === 'settings'} icon={<Settings size={18}/>} label="設定・バックアップ" onClick={() => setPage('settings')} />
       </nav>
       <div className="sidebar-foot"><Shield size={15}/> {cloud ? `クラウド同期：${cloud.syncStatus}` : 'この端末に保存'}</div>
     </aside>
     <main className="main-content">
       <header className="topbar">
-        <div><h1>{({ dashboard: 'ホーム', add: '試合を記録', history: '戦績一覧', settings: '設定・バックアップ' } as Record<Page, string>)[page]}</h1></div>
+        <div><h1>{({ dashboard: 'ホーム', add: '試合を記録', history: '戦績一覧', settings: '設定・バックアップ', heroStats: 'ヒーロー詳細ログ', heroDetail: 'ヒーロー詳細ログ' } as Record<Page, string>)[page]}</h1></div>
         <button className="primary-button top-add" onClick={startNewMatch}><Plus size={17}/> 試合を追加</button>
       </header>
 
@@ -946,6 +1051,54 @@ ${result.data.text ?? ''}`)
           <select aria-label="モードで絞り込み" value={historyMode} onChange={e => setHistoryMode(e.target.value as 'all' | Mode)}><option value="all">すべてのモード</option><option value="バトアリ">バトアリ</option><option value="フリバ">フリバ</option><option value="カスタム">カスタム</option></select>
         </div>
         {filteredMatches.length ? <MatchTable matches={filteredMatches} onEdit={beginEditMatch} onDelete={deleteMatch}/> : store.matches.length ? <p className="empty-inline">条件に一致する記録がありません。絞り込み条件を変更してください。</p> : <EmptyState onAdd={startNewMatch}/>}
+      </section>}
+
+      {page === 'heroStats' && <section className="page-stack hero-log-page">
+        <div className="content-card">
+          <div className="section-heading"><div><h3>ヒーロー別の累計成績</h3><p>過去分の数値と、このアプリで記録した試合を合算して表示します。</p></div><div className="round-icon"><Trophy size={20}/></div></div>
+          <p className="hero-log-explanation">「過去分」はアプリを使い始める前の累計です。過去分の試合数・勝ち数を入力して保存すると、今後このアプリで記録した試合数・勝ち数が自動で加算されます。勝率は合計勝ち数 ÷ 合計試合数です。</p>
+          <div className="table-wrap hero-log-table-wrap"><table className="hero-log-table"><thead><tr><th>ヒーロー</th><th>過去分 試合数</th><th>過去分 勝ち数</th><th>合計試合数</th><th>合計勝ち数</th><th>勝率</th><th>詳細</th></tr></thead><tbody>
+            {heroSummaryRows.map(hero => <tr key={hero.name}>
+              <td><div className="hero-log-name"><strong>{hero.name}</strong><small>{hero.role}</small></div></td>
+              <td><input className="hero-log-number-input" type="number" min="0" step="1" inputMode="numeric" aria-label={`${hero.name}の過去分試合数`} value={heroBaseDrafts[hero.name]?.battles ?? String(hero.baseBattles)} onChange={event => updateHeroBaseDraft(hero.name, 'battles', event.target.value)}/></td>
+              <td><input className="hero-log-number-input" type="number" min="0" step="1" inputMode="numeric" aria-label={`${hero.name}の過去分勝ち数`} value={heroBaseDrafts[hero.name]?.wins ?? String(hero.baseWins)} onChange={event => updateHeroBaseDraft(hero.name, 'wins', event.target.value)}/></td>
+              <td className="hero-log-number-cell">{hero.totalBattles.toLocaleString()}</td>
+              <td className="hero-log-number-cell">{hero.totalWins.toLocaleString()}</td>
+              <td className="hero-log-rate">{hero.winRate === null ? '—' : `${hero.winRate.toFixed(1)}%`}</td>
+              <td><div className="hero-log-row-actions"><button className="secondary-button hero-log-save-button" onClick={() => saveHeroBaseStats(hero.name)}>過去分を保存</button><button className="primary-button hero-log-detail-button" onClick={() => openHeroDetail(hero.name)}>詳細を見る</button></div></td>
+            </tr>)}
+          </tbody></table></div>
+        </div>
+      </section>}
+
+      {page === 'heroDetail' && <section className="page-stack hero-log-page">
+        <div className="content-card">
+          <div className="section-heading hero-detail-heading"><div><h3>{selectedHeroDetail?.name ?? selectedHeroDetailName} の詳細</h3><p>{selectedHeroDetail?.role ?? 'ヒーロー'} のマップ・味方・敵ヒーロー別成績</p></div><button className="secondary-button" onClick={() => setPage('heroStats')}>← 一覧へ戻る</button></div>
+          <div className="hero-detail-controls">
+            <label>モード<select value={heroDetailMode} onChange={event => setHeroDetailMode(event.target.value as 'all' | Mode)}><option value="all">すべて</option><option value="バトアリ">バトアリ</option><option value="フリバ">フリバ</option><option value="カスタム">カスタム</option></select></label>
+            <label>対象試合<select value={heroDetailRecentCount} onChange={event => setHeroDetailRecentCount(event.target.value as typeof heroDetailRecentCount)}><option value="all">全試合</option><option value="10">直近10戦</option><option value="30">直近30戦</option><option value="50">直近50戦</option><option value="100">直近100戦</option></select></label>
+          </div>
+          <div className="hero-detail-summary">
+            <div className="hero-detail-stat"><small>対象試合数</small><strong>{selectedHeroDetailRecords.length.toLocaleString()}</strong></div>
+            <div className="hero-detail-stat"><small>勝ち数</small><strong>{selectedHeroDetailRecords.filter(match => match.result === 'win').length.toLocaleString()}</strong></div>
+            <div className="hero-detail-stat"><small>勝率</small><strong>{selectedHeroDetailRecords.length ? `${(selectedHeroDetailRecords.filter(match => match.result === 'win').length / selectedHeroDetailRecords.length * 100).toFixed(1)}%` : '—'}</strong></div>
+          </div>
+          <p className="hero-log-explanation">この内訳はアプリ内に記録された試合から集計しています。手入力した過去分にはマップ・味方・敵の情報がないため、内訳には含めません。</p>
+        </div>
+        <div className="content-card">
+          <div className="hero-detail-tabs">
+            <button className={heroDetailSection === 'map' ? 'active' : ''} onClick={() => setHeroDetailSection('map')}>マップ別</button>
+            <button className={heroDetailSection === 'ally' ? 'active' : ''} onClick={() => setHeroDetailSection('ally')}>味方ヒーロー別</button>
+            <button className={heroDetailSection === 'enemy' ? 'active' : ''} onClick={() => setHeroDetailSection('enemy')}>敵ヒーロー別</button>
+          </div>
+          <div className="hero-detail-sort-controls">
+            <label>並べ替え<select value={heroDetailSortKey} onChange={event => setHeroDetailSortKey(event.target.value as HeroDetailSortKey)}><option value="winRate">勝率</option><option value="wins">勝ち数</option><option value="battles">試合数</option></select></label>
+            <button className="secondary-button" onClick={() => setHeroDetailSortDirection(current => current === 'desc' ? 'asc' : 'desc')}>{heroDetailSortDirection === 'desc' ? '降順 ↓' : '昇順 ↑'}</button>
+          </div>
+          <div className="table-wrap hero-detail-table-wrap"><table className="hero-log-table hero-detail-table"><thead><tr><th>{heroDetailSection === 'map' ? 'マップ' : heroDetailSection === 'ally' ? '味方ヒーロー' : '敵ヒーロー'}</th><th>試合数</th><th>勝ち数</th><th>勝率</th></tr></thead><tbody>
+            {heroDetailRows.map(row => <tr key={row.name} className={row.battles === 0 ? 'hero-detail-no-data' : ''}><td>{row.name}</td><td>{row.battles > 0 ? row.battles.toLocaleString() : '—'}</td><td>{row.battles > 0 ? row.wins.toLocaleString() : '—'}</td><td>{row.winRate === null ? '—' : `${row.winRate.toFixed(1)}%`}</td></tr>)}
+          </tbody></table></div>
+        </div>
       </section>}
 
       {page === 'settings' && <section className="page-stack">

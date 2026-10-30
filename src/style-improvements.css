@@ -278,3 +278,43 @@
   .record-slide-steps { width: 100%; }
   .current-rank-stat-card > strong { font-size: clamp(18px, 5vw, 24px) !important; }
 }
+
+/* hero-detail-log-styles-v1 */
+.hero-log-page { min-width: 0; }
+.hero-log-explanation { margin: 0 0 14px; color: var(--text-muted, #8e99b4); font-size: 11px; line-height: 1.8; }
+.hero-log-table-wrap, .hero-detail-table-wrap { width: 100%; overflow-x: auto; }
+.hero-log-table { width: 100%; min-width: 850px; border-collapse: separate; border-spacing: 0; font-size: 11px; }
+.hero-log-table th { padding: 11px 10px; color: var(--text-muted, #8e99b4); background: var(--surface-muted, #0b1320); text-align: left; white-space: nowrap; font-weight: 700; border-bottom: 1px solid var(--line, #293c4b); }
+.hero-log-table td { padding: 9px 10px; color: var(--text-main, #edf9fc); border-bottom: 1px solid var(--line, #293c4b); vertical-align: middle; white-space: nowrap; }
+.hero-log-name { display: flex; flex-direction: column; gap: 3px; min-width: 120px; }
+.hero-log-name small { color: var(--text-muted, #829aa8); font-size: 10px; }
+.hero-log-number-input { width: 86px; min-height: 34px; padding: 6px 8px; color: var(--text-main, #edf9fc); background: var(--surface-muted, #0b1320); border: 1px solid var(--line, #293c4b); border-radius: 7px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.hero-log-number-cell, .hero-log-rate { font-variant-numeric: tabular-nums; font-weight: 700; }
+.hero-log-rate { color: var(--accent-strong, #04bfd0) !important; }
+.hero-log-row-actions { display: flex; gap: 6px; align-items: center; }
+.hero-log-save-button, .hero-log-detail-button { padding: 7px 9px; font-size: 10px; }
+.hero-detail-heading { align-items: center; }
+.hero-detail-controls, .hero-detail-sort-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 5px 0 16px; }
+.hero-detail-controls label, .hero-detail-sort-controls label { display: grid; gap: 6px; color: var(--text-soft, #b5cbd5); font-size: 10px; font-weight: 700; }
+.hero-detail-controls select, .hero-detail-sort-controls select { min-width: 145px; }
+.hero-detail-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.hero-detail-stat { display: flex; flex-direction: column; gap: 7px; padding: 13px; border: 1px solid var(--line, #293c4b); border-radius: 10px; background: var(--surface-muted, #0b1320); }
+.hero-detail-stat small { color: var(--text-muted, #829aa8); font-size: 10px; }
+.hero-detail-stat strong { color: var(--text-main, #edf9fc); font-size: 20px; font-variant-numeric: tabular-nums; }
+.hero-detail-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
+.hero-detail-tabs button { padding: 9px 13px; border: 1px solid var(--line, #293c4b); border-radius: 8px; color: var(--text-soft, #b5cbd5); background: var(--surface-muted, #0b1320); font-size: 10px; font-weight: 700; }
+.hero-detail-tabs button.active { color: var(--accent-strong, #04bfd0); border-color: var(--accent-line, #24616c); background: var(--accent-soft, #10313a); }
+.hero-detail-sort-controls { justify-content: flex-end; margin: 0 0 12px; }
+.hero-detail-table { min-width: 520px; }
+.hero-detail-table th:not(:first-child), .hero-detail-table td:not(:first-child) { text-align: right; }
+.hero-detail-table .hero-detail-no-data td { color: var(--text-muted, #829aa8); }
+@media (max-width: 700px) {
+  .hero-log-table { min-width: 820px; }
+  .hero-detail-summary { gap: 7px; }
+  .hero-detail-stat { padding: 10px; }
+  .hero-detail-stat strong { font-size: 17px; }
+  .hero-detail-heading { align-items: flex-start; }
+  .hero-detail-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hero-detail-controls label, .hero-detail-controls select { min-width: 0; width: 100%; }
+}
+
