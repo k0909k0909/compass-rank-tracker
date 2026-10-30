@@ -61,6 +61,7 @@ type Store = {
 type Page = 'dashboard' | 'add' | 'history' | 'settings'
 type CloudContextValue = { saveCloudStore: (store: Store) => void; syncStatus: string }
 const CloudContext = createContext<CloudContextValue | null>(null)
+const appLastUpdatedAt = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(__APP_BUILD_AT__))
 
 // Appliv Gamesのロール別一覧と、やぎシミュの掲載ヒーローを参考にした初期一覧。
 // 新ヒーローは設定画面から追加でき、初回起動時にもこの一覧を補完します。
@@ -889,14 +890,14 @@ ${result.data.text ?? ''}`)
             </div>
             {visibleHeroes.length === 0 && <small className="small-note">条件に一致するヒーローがいません。検索や絞込みを変更してください。</small>}
           </div>
-          <div className="field field-wide"><label>マップ</label><select required={recordSlide === 1} value={availableRecordMaps.includes(form.mapName) ? form.mapName : (availableRecordMaps[0] ?? '')} onChange={e => setForm({ ...form, mapName: e.target.value })}>{availableRecordMaps.map(m => <option key={m} value={m}>{m}</option>)}</select><small className="small-note">{rotationApplied ? `${recordRotationDate} のバトアリは登録済みの4ステージのみ表示しています。` : `この日付のバトアリローテーションは未登録です。全マップを表示しています。フリバ・カスタムは常に全マップです。`}</small></div>
+          <div className="field field-wide"><label>マップ</label><select required={recordSlide === 1} value={availableRecordMaps.includes(form.mapName) ? form.mapName : (availableRecordMaps[0] ?? '')} onChange={e => setForm({ ...form, mapName: e.target.value })}>{availableRecordMaps.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
           <div className="field field-wide"><label>試合結果</label><div className="result-options">
             {(['win', 'loss', 'draw'] as Result[]).map(r => <button type="button" key={r} className={`result-choice ${form.result === r ? `selected ${r}` : ''}`} onClick={() => changeResult(r)}>{resultLabel(r)}</button>)}
           </div></div>
           {form.mode === 'バトアリ' ? <div className="field field-wide"><label>ランクポイントの増減 <small>実際の増減量を入力</small></label>
             <div className="rp-change-control"><div className="rp-direction-buttons"><button type="button" className={`result-choice ${form.rankDirection === 'plus' ? 'selected win' : ''}`} onClick={() => setForm({ ...form, rankDirection: 'plus' })}><Plus size={16}/> 増加</button><button type="button" className={`result-choice ${form.rankDirection === 'minus' ? 'selected loss' : ''}`} onClick={() => setForm({ ...form, rankDirection: 'minus' })}><Minus size={16}/> 減少</button></div><input aria-label="RP変動量" type="number" min="0" step="1" placeholder="0" value={form.rankDelta} onChange={e => setForm({ ...form, rankDelta: e.target.value })}/><strong className={form.result === 'draw' ? '' : form.rankDirection === 'minus' ? 'negative-rp' : 'positive-rp'}>{form.result === 'draw' ? '±0' : form.rankDirection === 'minus' ? `−${Math.abs(Number(form.rankDelta) || 0).toLocaleString()}` : `+${Math.abs(Number(form.rankDelta) || 0).toLocaleString()}`}</strong></div>
             <small className="small-note">試合後の予測ランク：{(() => { const before = normalizeRankState(Number(rankTierDraft) || currentRankState.tier, Number(rankPointsDraft) || 0); const delta = form.result === 'draw' ? 0 : (form.rankDirection === 'minus' ? -1 : 1) * Math.abs(Number(form.rankDelta) || 0); return formatRankState(applyRankChange(before, delta)) })()}</small>
-          </div> : <div className="field field-wide freeba-rank-note"><strong>{form.mode}ではランクポイントは変動しません。</strong><span>現在のランクは記録・確認のみ行います。</span></div>}
+          </div> : null}
           <div className="record-slide-nav primary-slide-nav" aria-label="記録ページの移動">
             <div className="record-slide-steps"><span className="record-slide-step active">1 基本情報</span><span className="record-slide-step">2 チーム構成</span></div>
             <div className="record-slide-actions">
@@ -909,7 +910,7 @@ ${result.data.text ?? ''}`)
             <button type="button" className="secondary-button" onClick={() => setRecordSlide(1)}>← 基本情報へ戻る</button>
             <span className="record-slide-step active">2 チーム構成</span>
           </div>
-          <div className="team-page-heading"><h4>チーム構成</h4><p>敵チーム3人、味方チームは自分以外の2人を任意で記録できます。横にスワイプしてページを移動できます。</p></div>
+          <div className="team-page-heading"><h4>チーム構成</h4></div>
           <div className="team-composition-grid">
             <section className="team-composition-side">
               <div className="team-side-header"><h4>味方チーム <small>自分以外の2人</small></h4></div>
@@ -929,7 +930,7 @@ ${result.data.text ?? ''}`)
               </div>
             </section>
           </div>
-          <div className="field field-wide"><label>メモ <small>任意</small></label><textarea rows={3} placeholder="味方編成、反省点、気づいたことなど" value={form.memo} onChange={e => setForm({ ...form, memo: e.target.value })}/></div>
+          <div className="field field-wide"><label>メモ <small>任意</small></label><textarea rows={3} placeholder="反省点、気づいたことなど" value={form.memo} onChange={e => setForm({ ...form, memo: e.target.value })}/></div>
           <div className="form-actions"><button type="button" className="secondary-button" onClick={() => { setEditingId(null); setRecordSlide(1); setPage('dashboard') }}>キャンセル</button><button type="submit" className="primary-button">{editingId ? <><Pencil size={17}/> 変更を保存</> : <><Plus size={17}/> 記録を保存して次へ</>}</button></div>
           </div></div></div>
         </form>
@@ -963,7 +964,7 @@ ${result.data.text ?? ''}`)
           <p className="small-note">S1〜S9と、そのランク内の0〜499ptを入力してください。過去の試合履歴は書き換えず、現在ランクと次回記録の基準値だけを修正します。</p>
         </div>
         <div className="content-card">
-          <div className="section-heading"><div><h3>ステージローテーション</h3><p>日付ごとにバトアリの4ステージを登録します。登録のない日やフリバ・カスタムでは全マップが選べます。</p></div><div className="round-icon"><CalendarDays size={20}/></div></div>
+          <div className="section-heading"><div><h3>ステージローテーション</h3></div><div className="round-icon"><CalendarDays size={20}/></div></div>
           <div className="field field-wide"><label>登録する月</label><input type="month" value={rotationMonthDraft} onChange={e => setRotationMonthDraft(e.target.value)} /></div>
           <div className="field field-wide"><label>対象日付</label><input type="date" value={rankRotationDateDraft} onChange={e => {
             const date = e.target.value
@@ -975,7 +976,7 @@ ${result.data.text ?? ''}`)
             {rotationMapDrafts.map((name, index) => <div className="catalog-item" key={index}><span>ステージ {index + 1}</span><select aria-label={`ステージ${index + 1}`} value={name} onChange={e => setRotationMapDrafts(current => current.map((item, itemIndex) => itemIndex === index ? e.target.value : item))}><option value="">選択してください</option>{store.maps.map(map => <option key={map} value={map}>{map}</option>)}</select></div>)}
           </div>
           <div className="backup-actions"><button className="primary-button" onClick={saveStageRotation}><Plus size={16}/> この日付の4ステージを登録</button></div>
-          <p className="small-note">シーズン初日の木曜日、土日、全ステージ対象の日は登録不要です。ローテーション対象日のみ登録してください。日付単位で保存するため、別の月へ自動流用されません。</p>
+          
           <div className="section-heading"><div><h4>登録済みローテーション</h4><p>登録した日付のみバトアリのマップ候補を制限します。</p></div></div>
           <div className="catalog-list">{Object.entries(store.stageRotations ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([date, maps]) => <div className="catalog-item" key={date}><span className="rotation-list-name"><strong>{date}</strong><small>{maps.join(' ／ ')}</small></span><button className="icon-button" aria-label={`${date}のローテーションを削除`} onClick={() => removeStageRotation(date)}><Trash2 size={16}/></button></div>)}{Object.keys(store.stageRotations ?? {}).length === 0 && <p className="empty-inline">ローテーションはまだ登録されていません。</p>}</div>
           <div className="section-heading"><div><h4>画像からローテーションを読み取る</h4><p>お知らせ画像を読み取り、日付ごとの4ステージ候補を作ります。</p></div></div>
@@ -997,6 +998,7 @@ ${result.data.text ?? ''}`)
           <div className="catalog-list map-list">{store.maps.map(m => <div className="catalog-item" key={m}><span>{m}</span><button className="icon-button" aria-label={`${m}を削除`} onClick={() => removeMap(m)}><Trash2 size={16}/></button></div>)}</div>
         </div>
         <div className="content-card future-card"><div className="round-icon"><Activity size={20}/></div><div><h3>現在の機能</h3><p>試合日時、バトアリ／フリバ、リセット操作で切り替わるシーズン、実装時期順のヒーロー選択、お気に入り・ロール絞込み、S1〜S9のランク・ポイント管理、バックアップ・復元に対応しています。</p></div></div>
+        <p className="small-note" style={{ textAlign: 'right', fontSize: '0.75rem' }}>最終更新日時：{appLastUpdatedAt}</p>
       </section>}
       <footer className="app-footer">コンパス戦績ノート <span>·</span> Version 0.2.0</footer>
     </main>
