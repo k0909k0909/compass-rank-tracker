@@ -785,7 +785,7 @@ function TrackerApp() {
           }
         }
       })
-      terminateWorker = () => worker.terminate()
+      terminateWorker = async () => { await worker.terminate() }
       const recognizedParts: string[] = []
       for (const [index, file] of imageFiles.entries()) {
         setRotationOcrStatus(`${index + 1}/${imageFiles.length}枚目を読み取り中：${file.name}`)
@@ -793,9 +793,7 @@ function TrackerApp() {
         recognizedParts.push(`【${file.name}】
 ${result.data.text ?? ''}`)
       }
-      const recognizedText = recognizedParts.join('
-
-')
+      const recognizedText = recognizedParts.join('\n\n')
       setRotationOcrText(recognizedText)
       setRotationOcrStatus(recognizedText.trim() ? '読み取り完了。文字を確認し「候補を抽出」を押してください。' : '文字を認識できませんでした。画像を変えるか手入力してください。')
     } catch (error) {
