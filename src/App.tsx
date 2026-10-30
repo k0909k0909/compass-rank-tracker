@@ -40,6 +40,12 @@ type Store = {
   maps: string[]
   initialRankPoints?: number | null
   lastMode?: Mode
+  /** 次回の試合記録で初期選択するヒーロー */
+  lastUsedHeroName?: string
+  /** 次回の試合記録で引き継ぐ、固定中の味方ヒーロー */
+  lastLockedAllyHeroNames?: string[]
+  /** 味方1・2それぞれの固定状態 */
+  lastLockedAllySlots?: boolean[]
   /** 現在のランク（S1〜S9） */
   currentRankTier?: number
   /** 現在のランク内ポイント */
@@ -119,6 +125,7 @@ const initialMaps = [
   'バリバリ！てげてげモーターウェイ', 'いこっさ！ダイダイダイナソー博物館', 'ジャンジャン麻雀の間', 'ぼちぼちボッチ墓地（毒）'
 ]
 const storageKey = 'compass-rank-tracker-v1'
+const recordDraftStorageKey = `${storageKey}-record-draft`
 const nowLocalInput = () => {
   const now = new Date()
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
@@ -133,6 +140,24 @@ const normalizeDateTime = (value: string | undefined) => {
 const seasonLabelFromDate = (dateTime: string) => {
   const [year, month] = dateTime.slice(0, 7).split('-')
   return year && month ? `${year}年${Number(month)}月シーズン` : ''
+}
+type RecordDraft = {
+  page?: Page
+  editingId?: string | null
+  recordSlide?: 1 | 2
+  lockAlly1?: boolean
+  lockAlly2?: boolean
+  rankTierDraft?: string
+  rankPointsDraft?: string
+  form?: Record<string, any>
+}
+function loadRecordDraft(): RecordDraft | null {
+  try {
+    const raw = localStorage.getItem(recordDraftStorageKey)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as RecordDraft
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch { return null }
 }
 type RankState = { tier: number; points: number }
 const MIN_RANK = 1
@@ -237,6 +262,11 @@ function normalizeStore(input: Partial<Store> | null | undefined): Store {
   return {
     ...(input ?? {}), matches, heroes, maps, initialRankPoints,
     lastMode: input?.lastMode === 'フリバ' ? 'フリバ' : 'バトアリ',
+    lastUsedHeroName: typeof input?.lastUsedHeroName === 'string' ? input.lastUsedHeroName : undefined,
+    lastLockedAllyHeroNames: Array.isArray(input?.lastLockedAllyHeroNames)
+      ? input.lastLockedAllyHeroNames.slice(0, 2).map(name => typeof name === 'string' ? name : '') : ['', ''],
+    lastLockedAllySlots: Array.isArray(input?.lastLockedAllySlots)
+      ? [Boolean(input.lastLockedAllySlots[0]), Boolean(input.lastLockedAllySlots[1])] : [false, false],
     currentRankTier: inferredRank.tier, currentRankPoints: inferredRank.points,
     activeSeason, lastSeasonResetMonth: resetMonth
   }
@@ -274,11 +304,14 @@ function TrackerApp() {
   const cloud = useContext(CloudContext)
   const [store, setStore] = useState<Store>(loadStore)
   const storeRef = useRef(store)
-  const [rankTierDraft, setRankTierDraft] = useState(String(store.currentRankTier ?? 1))
-  const [rankPointsDraft, setRankPointsDraft] = useState(String(store.currentRankPoints ?? 0))
-  const [page, setPage] = useState<Page>('dashboard')
+  const savedDraft = useMemo(() => loadRecordDraft(), [])
+  const [rankTierDraft, setRankTierDraft] = useState(savedDraft?.rankTierDraft ?? String(store.currentRankTier ?? 1))
+  const [rankPointsDraft, setRankPointsDraft] = useState(savedDraft?.rankPointsDraft ?? String(store.currentRankPoints ?? 0))
+  const [page, setPage] = useState<Page>(() =>
+    ['dashboard', 'add', 'history', 'settings'].includes(savedDraft?.page ?? '') ? savedDraft!.page! : 'dashboard'
+  )
   const [toast, setToast] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(() => savedDraft?.editingId ?? null)
   const [historyQuery, setHistoryQuery] = useState('')
   const [historyResult, setHistoryResult] = useState<'all' | Result>('all')
   const [historyHero, setHistoryHero] = useState('all')
@@ -286,16 +319,29 @@ function TrackerApp() {
   const [historyMode, setHistoryMode] = useState<'all' | Mode>('all')
   const [heroRoleFilter, setHeroRoleFilter] = useState<'all' | Role>('all')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
-  const [recordSlide, setRecordSlide] = useState<1 | 2>(1)
-  const [lockAlly1, setLockAlly1] = useState(false)
-  const [lockAlly2, setLockAlly2] = useState(false)
+  const [recordSlide, setRecordSlide] = useState<1 | 2>(() => savedDraft?.recordSlide === 2 ? 2 : 1)
+  const [lockAlly1, setLockAlly1] = useState(() => savedDraft?.lockAlly1 ?? Boolean(store.lastLockedAllySlots?.[0]))
+  const [lockAlly2, setLockAlly2] = useState(() => savedDraft?.lockAlly2 ?? Boolean(store.lastLockedAllySlots?.[1]))
   const slideTouchStartX = useRef<number | null>(null)
   const importRef = useRef<HTMLInputElement>(null)
-  const [form, setForm] = useState({
-    playedAt: nowLocalInput(), seasonEnabled: false, seasonLabel: store.activeSeason ?? seasonLabelFromDate(nowLocalInput()), mode: (store.lastMode ?? 'バトアリ') as Mode,
-    heroName: [...store.matches].sort((a, b) => b.playedAt.localeCompare(a.playedAt))[0]?.heroName ?? '', mapName: store.maps[0] ?? '', result: 'win' as Result,
-    rankDirection: 'plus' as 'plus' | 'minus', rankDelta: '0', memo: '',
-    enemyHeroNames: ['', '', ''], allyHeroNames: ['', '']
+  const [form, setForm] = useState(() => {
+    const defaults = {
+      playedAt: nowLocalInput(), seasonEnabled: false, seasonLabel: store.activeSeason ?? seasonLabelFromDate(nowLocalInput()), mode: (store.lastMode ?? 'バトアリ') as Mode,
+      heroName: store.lastUsedHeroName ?? [...store.matches].sort((a, b) => b.playedAt.localeCompare(a.playedAt))[0]?.heroName ?? '',
+      mapName: store.maps[0] ?? '', result: 'win' as Result,
+      rankDirection: 'plus' as 'plus' | 'minus', rankDelta: '0', memo: '',
+      enemyHeroNames: ['', '', ''],
+      allyHeroNames: [...(store.lastLockedAllyHeroNames ?? ['', '']), '', ''].slice(0, 2)
+    }
+    const draft = savedDraft?.form
+    if (!draft || typeof draft !== 'object') return defaults
+    const enemies = Array.isArray(draft.enemyHeroNames) ? draft.enemyHeroNames : defaults.enemyHeroNames
+    const allies = Array.isArray(draft.allyHeroNames) ? draft.allyHeroNames : defaults.allyHeroNames
+    return {
+      ...defaults, ...draft,
+      enemyHeroNames: [...enemies, '', '', ''].slice(0, 3),
+      allyHeroNames: [...allies, '', ''].slice(0, 2)
+    }
   })
   const [heroDraft, setHeroDraft] = useState('')
   const [heroRoleDraft, setHeroRoleDraft] = useState<Role>('アタッカー')
@@ -303,6 +349,13 @@ function TrackerApp() {
 
   useEffect(() => { storeRef.current = store }, [store])
   useEffect(() => { localStorage.setItem(storageKey, JSON.stringify(store)); cloud?.saveCloudStore(store) }, [store])
+  useEffect(() => {
+    try {
+      localStorage.setItem(recordDraftStorageKey, JSON.stringify({
+        page, form, editingId, recordSlide, lockAlly1, lockAlly2, rankTierDraft, rankPointsDraft
+      }))
+    } catch { /* localStorage が利用できない環境では下書き保存を省略 */ }
+  }, [page, form, editingId, recordSlide, lockAlly1, lockAlly2, rankTierDraft, rankPointsDraft])
   useEffect(() => {
     const checkAutomaticSeasonReset = () => {
       const current = storeRef.current
@@ -415,7 +468,7 @@ function TrackerApp() {
     setHeroRoleFilter('all')
     setFavoritesOnly(false)
     setRecordSlide(1)
-    setForm({ playedAt: nowLocalInput(), seasonEnabled: false, seasonLabel: store.activeSeason ?? seasonLabelFromDate(nowLocalInput()), mode: store.lastMode ?? 'バトアリ', heroName: sortedMatches[0]?.heroName ?? '', mapName: store.maps[0] ?? '', result: 'win', rankDirection: 'plus', rankDelta: '0', memo: '', enemyHeroNames: ['', '', ''], allyHeroNames: [lockAlly1 ? (form.allyHeroNames[0] ?? '') : '', lockAlly2 ? (form.allyHeroNames[1] ?? '') : ''] })
+    setForm({ playedAt: nowLocalInput(), seasonEnabled: false, seasonLabel: store.activeSeason ?? seasonLabelFromDate(nowLocalInput()), mode: store.lastMode ?? 'バトアリ', heroName: store.lastUsedHeroName ?? sortedMatches[0]?.heroName ?? '', mapName: store.maps[0] ?? '', result: 'win', rankDirection: 'plus', rankDelta: '0', memo: '', enemyHeroNames: ['', '', ''], allyHeroNames: [lockAlly1 ? (form.allyHeroNames[0] ?? '') : '', lockAlly2 ? (form.allyHeroNames[1] ?? '') : ''] })
     setRankTierDraft(String(store.currentRankTier ?? 1))
     setRankPointsDraft(String(store.currentRankPoints ?? 0))
     setPage('add')
@@ -476,6 +529,11 @@ function TrackerApp() {
       rankBeforeTier: rankBefore.tier, rankBeforePoints: rankBefore.points,
       rankAfterTier: rankAfter.tier, rankAfterPoints: rankAfter.points
     }
+    const nextLockedAllySlots = [lockAlly1, lockAlly2]
+    const nextLockedAllyHeroNames = [
+      lockAlly1 ? (form.allyHeroNames[0] ?? '') : '',
+      lockAlly2 ? (form.allyHeroNames[1] ?? '') : ''
+    ]
     if (editingId) {
       const updated: Store = { ...storeRef.current, lastMode: form.mode, matches: storeRef.current.matches.map(m => m.id === editingId ? match : m) }
       storeRef.current = updated
@@ -484,6 +542,9 @@ function TrackerApp() {
       const updated: Store = {
         ...storeRef.current,
         lastMode: form.mode,
+        lastUsedHeroName: hero.name,
+        lastLockedAllyHeroNames: nextLockedAllyHeroNames,
+        lastLockedAllySlots: nextLockedAllySlots,
         matches: [match, ...storeRef.current.matches],
         ...(rankedMatch ? { currentRankTier: rankAfter.tier, currentRankPoints: rankAfter.points } : {})
       }
@@ -505,7 +566,7 @@ function TrackerApp() {
       setFavoritesOnly(false)
       setForm(old => ({ playedAt: nextDate, seasonEnabled: old.mode === 'バトアリ' ? old.seasonEnabled : false,
         seasonLabel: storeRef.current.activeSeason ?? seasonLabelFromDate(nextDate), mode: old.mode, heroName: hero.name,
-        mapName: old.mapName || storeRef.current.maps[0] || '', result: 'win', rankDirection: 'plus', rankDelta: '0', memo: '', enemyHeroNames: ['', '', ''], allyHeroNames: [lockAlly1 ? (old.allyHeroNames[0] ?? '') : '', lockAlly2 ? (old.allyHeroNames[1] ?? '') : ''] }))
+        mapName: old.mapName || storeRef.current.maps[0] || '', result: 'win', rankDirection: 'plus', rankDelta: '0', memo: '', enemyHeroNames: ['', '', ''], allyHeroNames: nextLockedAllyHeroNames }))
       setPage('add')
     }
     notify(wasEditing ? '試合記録を更新しました' : rankedMatch ? `試合を記録しました（${formatRankState(rankAfter)}）。次の試合を入力できます` : `${form.mode}の試合を記録しました。次の試合を入力できます`)
@@ -884,5 +945,5 @@ export default function App() {
   if (!supabase) return <div className="auth-shell">{themeToggle}<div className="auth-card"><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><h1>クラウド同期の設定</h1><p>Supabase の接続情報がまだ設定されていません。公開設定後に、このアプリを利用できるようになります。</p><ol><li>Supabase プロジェクトを作成</li><li>SQL Editor で <code>supabase/migrations/001_initial_schema.sql</code> を実行</li><li>プロジェクトの URL と Publishable key をホスティング設定に登録</li></ol><p className="small-note">この設定画面は、接続情報を入力する前の状態です。</p></div></div>
   if (!user) return <div className="auth-shell">{themeToggle}<form className="auth-card" onSubmit={submitAuth}><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><div className="eyebrow">RANK TRACKER CLOUD</div><h1>コンパス戦績ノート</h1><p>アカウントでログインすると、PC とスマホで記録を共有できます。</p><div className="field"><label>メールアドレス</label><input type="email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} /></div><div className="field"><label>パスワード（6文字以上）</label><input type="password" required minLength={6} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} /></div><button className="primary-button auth-submit" type="submit">{mode === 'login' ? 'ログイン' : 'アカウントを作成'}</button><button className="text-button auth-switch" type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>{mode === 'login' ? '初めて使う方：アカウント作成' : 'すでにアカウントをお持ちの方：ログイン'}</button>{message && <p className="auth-message">{message}</p>}</form></div>
   if (!ready) return <div className="auth-shell">{themeToggle}<div className="auth-card"><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><h1>クラウドデータを準備中</h1><p>{syncStatus}。しばらくお待ちください。</p>{message && <p className="auth-message">{message}</p>}<button className="secondary-button" onClick={() => supabase.auth.signOut()}>ログアウト</button></div></div>
-  return <CloudContext.Provider value={{ saveCloudStore, syncStatus }}><><div className="cloud-user-bar">{themeToggle}<span className="cloud-login-status">{user.email} でログイン中 · 同期：{syncStatus}</span><button className="logout-button" onClick={() => supabase.auth.signOut()}>ログアウト</button></div><TrackerApp /></></CloudContext.Provider>
+  return <CloudContext.Provider value={{ saveCloudStore, syncStatus }}><><div className="cloud-user-bar">{themeToggle}<span className="cloud-login-status">ログイン中 · 同期：{syncStatus}</span><button className="logout-button" onClick={() => supabase.auth.signOut()}>ログアウト</button></div><TrackerApp /></></CloudContext.Provider>
 }
