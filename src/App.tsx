@@ -935,13 +935,13 @@ ${result.data.text ?? ''}`)
         <NavItem active={page === 'add'} icon={<Plus size={18}/>} label="試合を記録" onClick={startNewMatch} />
         <NavItem active={page === 'history'} icon={<History size={18}/>} label="戦績一覧" onClick={() => setPage('history')} />
         <NavItem active={page === 'heroStats' || page === 'heroDetail'} icon={<Trophy size={18}/>} label="ヒーロー詳細ログ" onClick={() => setPage('heroStats')} />
-        <NavItem active={page === 'settings'} icon={<Settings size={18}/>} label="設定・バックアップ" onClick={() => setPage('settings')} />
+        <NavItem active={page === 'settings'} icon={<Settings size={18}/>} label="設定・その他" onClick={() => setPage('settings')} />
       </nav>
       <div className="sidebar-foot"><Shield size={15}/> {cloud ? `クラウド同期：${cloud.syncStatus}` : 'この端末に保存'}</div>
     </aside>
     <main className="main-content">
       <header className="topbar">
-        <div><h1>{({ dashboard: 'ホーム', add: '試合を記録', history: '戦績一覧', settings: '設定・バックアップ', heroStats: 'ヒーロー詳細ログ', heroDetail: 'ヒーロー詳細ログ' } as Record<Page, string>)[page]}</h1></div>
+        <div><h1>{({ dashboard: 'ホーム', add: '試合を記録', history: '戦績一覧', settings: '設定・その他', heroStats: 'ヒーロー詳細ログ', heroDetail: 'ヒーロー詳細ログ' } as Record<Page, string>)[page]}</h1></div>
         <button className="primary-button top-add" onClick={startNewMatch}><Plus size={17}/> 試合を追加</button>
       </header>
 
