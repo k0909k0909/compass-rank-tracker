@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { createWorker } from 'tesseract.js'
 import { createClient, type User } from '@supabase/supabase-js'
-import { Activity, BarChart3, CalendarDays, ChevronDown, Download, FileUp, Gauge, History, Lock, Minus, Pencil, Plus, Search, Settings, Shield, Star, Sun, Moon, Swords, Trash2, Trophy, Unlock, X } from 'lucide-react'
+import { Activity, BarChart3, CalendarDays, ChevronDown, ChevronUp, Download, FileUp, Gauge, GripVertical, History, LayoutDashboard, Lock, Menu, Minus, Pencil, Plus, Search, Settings, Shield, Star, Sun, Moon, Swords, Trash2, Trophy, Unlock, X } from 'lucide-react'
 import compassNoteMark from './assets/compass-note-mark.svg'
 import './style.css'
 import './style-improvements.css'
@@ -63,8 +63,25 @@ type Store = {
   stageRotations?: Record<string, string[]>
   /** アプリ導入前の累計試合数・勝ち数。アプリ内記録分と合算して表示 */
   heroBaseStats?: Record<string, HeroBaseStat>
+  /** ホーム画面の配置。既存の保存データには初期配置を補います。 */
+  dashboardWidgets?: DashboardWidget[]
+  /** サイドメニューの表示順 */
+  menuOrder?: NavigationKey[]
 }
 type Page = 'dashboard' | 'add' | 'history' | 'settings' | 'heroStats' | 'heroDetail'
+type NavigationKey = 'dashboard' | 'add' | 'history' | 'heroStats' | 'settings'
+type DashboardWidgetType = 'rank' | 'winRate' | 'streak' | 'popularHero' | 'heroInfo' | 'note' | 'monthly' | 'recentMatches'
+type DashboardPeriod = 'today' | 'month' | 'all'
+type DashboardWidget = {
+  id: string
+  type: DashboardWidgetType
+  period?: DashboardPeriod
+  heroName?: string
+  showHeading?: boolean
+  heading?: string
+  body?: string
+}
+type MonthlyStat = { month: string; total: number; wins: number; losses: number; draws: number; rate: string }
 type CloudContextValue = { saveCloudStore: (store: Store) => void; syncStatus: string }
 const CloudContext = createContext<CloudContextValue | null>(null)
 const appLastUpdatedAt = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(__APP_BUILD_AT__))
@@ -123,6 +140,47 @@ const heroImplementationOrder = [
   'ファースト', 'レゼ', 'シャルル・リヒター', '一姫', 'エドワード・エルリック', 'タココ'
 ]
 const heroOrderIndex = new Map(heroImplementationOrder.map((name, index) => [name, index]))
+const defaultNavigationOrder: NavigationKey[] = ['dashboard', 'add', 'history', 'heroStats', 'settings']
+const defaultDashboardWidgets: DashboardWidget[] = [
+  { id: 'rank', type: 'rank' },
+  { id: 'win-rate', type: 'winRate', period: 'today' },
+  { id: 'streak', type: 'streak' },
+  { id: 'popular-hero', type: 'popularHero', period: 'all' },
+  { id: 'hero-info', type: 'heroInfo', heroName: '' },
+  { id: 'personal-note', type: 'note', showHeading: false, heading: '', body: '' },
+  { id: 'monthly', type: 'monthly' },
+  { id: 'recent-matches', type: 'recentMatches' }
+]
+const dashboardWidgetTypes: DashboardWidgetType[] = ['rank', 'winRate', 'streak', 'popularHero', 'heroInfo', 'note', 'monthly', 'recentMatches']
+const repeatableDashboardWidgetTypes: DashboardWidgetType[] = ['heroInfo', 'note']
+function normalizeMenuOrder(value: unknown): NavigationKey[] {
+  const valid = Array.isArray(value) ? value.filter((item): item is NavigationKey => defaultNavigationOrder.includes(item as NavigationKey)) : []
+  return [...new Set([...valid, ...defaultNavigationOrder])]
+}
+function normalizeDashboardWidgets(value: unknown): DashboardWidget[] {
+  if (!Array.isArray(value)) return defaultDashboardWidgets.map(widget => ({ ...widget }))
+  const seenIds = new Set<string>()
+  const seenSingletons = new Set<DashboardWidgetType>()
+  return value.slice(0, 80).flatMap((raw, index) => {
+    if (!raw || typeof raw !== 'object') return []
+    const item = raw as Record<string, unknown>
+    if (typeof item.type !== 'string' || !dashboardWidgetTypes.includes(item.type as DashboardWidgetType)) return []
+    const type = item.type as DashboardWidgetType
+    if (!repeatableDashboardWidgetTypes.includes(type) && seenSingletons.has(type)) return []
+    if (!repeatableDashboardWidgetTypes.includes(type)) seenSingletons.add(type)
+    let id = typeof item.id === 'string' && item.id.trim() ? item.id.trim().slice(0, 100) : `${type}-${index}`
+    if (seenIds.has(id)) id = `${id}-${index}`
+    seenIds.add(id)
+    const period = item.period === 'today' || item.period === 'month' || item.period === 'all' ? item.period : undefined
+    return [{
+      id, type, period,
+      heroName: typeof item.heroName === 'string' ? item.heroName.slice(0, 100) : '',
+      showHeading: Boolean(item.showHeading),
+      heading: typeof item.heading === 'string' ? item.heading.slice(0, 80) : '',
+      body: typeof item.body === 'string' ? item.body.slice(0, 3000) : ''
+    }]
+  })
+}
 const initialHeroes: Hero[] = Object.entries(heroNamesByRole).flatMap(([role, names]) => names.map(name => ({ name, role: role as Role })))
   .filter((hero, index, list) => list.findIndex(item => item.name === hero.name) === index)
 
@@ -233,7 +291,8 @@ const freshStore = (): Store => {
     matches: [], heroes: initialHeroes, maps: initialMaps, initialRankPoints: null, lastMode: 'バトアリ',
     currentRankTier: 1, currentRankPoints: 0,
     activeSeason: seasonLabelFromMonthKey(previousMonth), lastSeasonResetMonth: previousMonth,
-    stageRotations: { ...initialNovember2026StageRotations }
+    stageRotations: { ...initialNovember2026StageRotations },
+    dashboardWidgets: defaultDashboardWidgets.map(widget => ({ ...widget })), menuOrder: [...defaultNavigationOrder]
   }
 }
 const mergeHeroes = (saved: Hero[] | undefined | null): Hero[] => {
@@ -310,7 +369,8 @@ function normalizeStore(input: Partial<Store> | null | undefined): Store {
     lastLockedAllySlots: Array.isArray(input?.lastLockedAllySlots)
       ? [Boolean(input.lastLockedAllySlots[0]), Boolean(input.lastLockedAllySlots[1])] : [false, false],
     currentRankTier: inferredRank.tier, currentRankPoints: inferredRank.points,
-    activeSeason, lastSeasonResetMonth: resetMonth, stageRotations, heroBaseStats
+    activeSeason, lastSeasonResetMonth: resetMonth, stageRotations, heroBaseStats,
+    dashboardWidgets: normalizeDashboardWidgets(input?.dashboardWidgets), menuOrder: normalizeMenuOrder(input?.menuOrder)
   }
 }
 function loadStore(): Store {
@@ -387,6 +447,10 @@ function TrackerApp() {
     ['dashboard', 'add', 'history', 'settings', 'heroStats', 'heroDetail'].includes(savedDraft?.page ?? '') ? savedDraft!.page! : 'dashboard'
   )
   const [toast, setToast] = useState('')
+  const [dashboardEditorOpen, setDashboardEditorOpen] = useState(false)
+  const [dashboardEditorTab, setDashboardEditorTab] = useState<'home' | 'menu'>('home')
+  const editorSortDragRef = useRef<{ scope: 'home' | 'menu'; id: string; pointerId: number; startX: number; startY: number; moved: boolean } | null>(null)
+  const [editorDraggingKey, setEditorDraggingKey] = useState('')
   const [editingId, setEditingId] = useState<string | null>(() => savedDraft?.editingId ?? null)
   const [historyQuery, setHistoryQuery] = useState('')
   const [historyResult, setHistoryResult] = useState<'all' | Result>('all')
@@ -495,13 +559,17 @@ function TrackerApp() {
     }
     return highest
   }, [store.matches])
-  const monthlyStats = useMemo(() => {
-    const buckets = new Map<string, Match[]>()
-    for (const match of store.matches) { const month = match.playedAt.slice(0, 7); buckets.set(month, [...(buckets.get(month) ?? []), match]) }
-    return [...buckets.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 6).map(([month, matches]) => ({
-      month, total: matches.length, wins: matches.filter(m => m.result === 'win').length, losses: matches.filter(m => m.result === 'loss').length,
-      draws: matches.filter(m => m.result === 'draw').length, rate: percent(matches.filter(m => m.result === 'win').length, matches.filter(m => m.result !== 'draw').length)
-    }))
+  const monthlyStats = useMemo<MonthlyStat[]>(() => {
+    const now = new Date()
+    return Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth() - index, 1)
+      const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      const matches = store.matches.filter(match => match.playedAt.startsWith(month))
+      const wins = matches.filter(match => match.result === 'win').length
+      const losses = matches.filter(match => match.result === 'loss').length
+      const draws = matches.filter(match => match.result === 'draw').length
+      return { month, total: matches.length, wins, losses, draws, rate: percent(wins, wins + losses) }
+    })
   }, [store.matches])
   const heroStats = useMemo(() => {
     const buckets = new Map<string, Match[]>()
@@ -947,49 +1015,152 @@ ${result.data.text ?? ''}`)
     }
   }
 
+  function updateDashboardWidget(id: string, changes: Partial<DashboardWidget>) {
+    setStore(current => ({ ...current, dashboardWidgets: (current.dashboardWidgets ?? defaultDashboardWidgets).map(widget => widget.id === id ? { ...widget, ...changes } : widget) }))
+  }
+  function addDashboardWidget(type: DashboardWidgetType) {
+    setStore(current => {
+      const items = [...(current.dashboardWidgets ?? defaultDashboardWidgets)]
+      if (!repeatableDashboardWidgetTypes.includes(type) && items.some(widget => widget.type === type)) return current
+      const id = `${type}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+      const widget: DashboardWidget = { id, type }
+      if (type === 'winRate') widget.period = 'today'
+      if (type === 'popularHero') widget.period = 'all'
+      if (type === 'heroInfo') widget.heroName = ''
+      items.push(widget)
+      return { ...current, dashboardWidgets: items }
+    })
+  }
+  function removeDashboardWidget(id: string) {
+    setStore(current => ({ ...current, dashboardWidgets: (current.dashboardWidgets ?? []).filter(widget => widget.id !== id) }))
+  }
+  function reorderDashboardWidgets(sourceId: string, targetId: string, before = true) {
+    setStore(current => {
+      const items = [...(current.dashboardWidgets ?? [])]
+      const sourceIndex = items.findIndex(item => item.id === sourceId)
+      if (sourceIndex < 0 || sourceId === targetId) return current
+      const [moved] = items.splice(sourceIndex, 1)
+      const targetIndex = items.findIndex(item => item.id === targetId)
+      if (targetIndex < 0) return current
+      items.splice(targetIndex + (before ? 0 : 1), 0, moved)
+      return { ...current, dashboardWidgets: items }
+    })
+  }
+  function moveDashboardWidget(id: string, offset: number) {
+    setStore(current => {
+      const items = [...(current.dashboardWidgets ?? [])]
+      const index = items.findIndex(item => item.id === id)
+      const target = index + offset
+      if (index < 0 || target < 0 || target >= items.length) return current
+      ;[items[index], items[target]] = [items[target], items[index]]
+      return { ...current, dashboardWidgets: items }
+    })
+  }
+  function reorderMenuItems(sourceId: NavigationKey, targetId: NavigationKey, before = true) {
+    setStore(current => {
+      const items = [...normalizeMenuOrder(current.menuOrder)]
+      const sourceIndex = items.indexOf(sourceId)
+      if (sourceIndex < 0 || sourceId === targetId) return current
+      items.splice(sourceIndex, 1)
+      const targetIndex = items.indexOf(targetId)
+      if (targetIndex < 0) return current
+      items.splice(targetIndex + (before ? 0 : 1), 0, sourceId)
+      return { ...current, menuOrder: items }
+    })
+  }
+  function moveMenuItem(id: NavigationKey, offset: number) {
+    setStore(current => {
+      const items = [...normalizeMenuOrder(current.menuOrder)]
+      const index = items.indexOf(id)
+      const target = index + offset
+      if (index < 0 || target < 0 || target >= items.length) return current
+      ;[items[index], items[target]] = [items[target], items[index]]
+      return { ...current, menuOrder: items }
+    })
+  }
+  function handleEditorPointerDown(scope: 'home' | 'menu', id: string, event: React.PointerEvent<HTMLButtonElement>) {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    event.preventDefault()
+    editorSortDragRef.current = { scope, id, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, moved: false }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+  function handleEditorPointerMove(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = editorSortDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 7) {
+      drag.moved = true
+      setEditorDraggingKey(`${drag.scope}:${drag.id}`)
+    }
+  }
+  function handleEditorPointerUp(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = editorSortDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (drag.moved) {
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-editor-sort-id]')
+      if (target && target.dataset.editorSortScope === drag.scope) {
+        const targetId = target.dataset.editorSortId ?? ''
+        const rect = target.getBoundingClientRect()
+        const before = event.clientY < rect.top + rect.height / 2
+        if (drag.scope === 'home') reorderDashboardWidgets(drag.id, targetId, before)
+        else reorderMenuItems(drag.id as NavigationKey, targetId as NavigationKey, before)
+      }
+    }
+    editorSortDragRef.current = null
+    setEditorDraggingKey('')
+  }
+  function handleEditorPointerCancel() {
+    editorSortDragRef.current = null
+    setEditorDraggingKey('')
+  }
+
+  const navigationEntries: { key: NavigationKey; label: string; icon: React.ReactNode; action: () => void }[] = [
+    { key: 'dashboard', label: 'ホーム', icon: <Gauge size={18}/>, action: () => setPage('dashboard') },
+    { key: 'add', label: '試合を記録', icon: <Plus size={18}/>, action: startNewMatch },
+    { key: 'history', label: '戦績一覧', icon: <History size={18}/>, action: () => setPage('history') },
+    { key: 'heroStats', label: 'ヒーロー詳細ログ', icon: <Trophy size={18}/>, action: () => setPage('heroStats') },
+    { key: 'settings', label: '設定・その他', icon: <Settings size={18}/>, action: () => setPage('settings') }
+  ]
+  const orderedNavigationEntries = normalizeMenuOrder(store.menuOrder).map(key => navigationEntries.find(item => item.key === key)!).filter(Boolean)
+  const widgetCatalog: { type: DashboardWidgetType; label: string; description: string; size: string }[] = [
+    { type: 'rank', label: '現在のランク', description: '現在のランクとポイント', size: '横1' },
+    { type: 'winRate', label: '勝率', description: '今日・今月・全体を切り替え', size: '横1' },
+    { type: 'streak', label: '連勝数', description: '現在の連勝・連敗と最高連勝', size: '横1' },
+    { type: 'popularHero', label: '使用率の高いヒーロー', description: '今日・今月・全体を切り替え', size: '横1' },
+    { type: 'heroInfo', label: '指定ヒーローの情報', description: '勝率・使用数・称号までの進捗。複数追加可能', size: '横2' },
+    { type: 'note', label: '自由記載', description: '目標やメモ。複数追加可能', size: '横2' },
+    { type: 'monthly', label: '月別成績', description: '今月から直近6か月をスライド表示', size: '横1' },
+    { type: 'recentMatches', label: '直近の試合履歴', description: '最新5試合。横2・縦2', size: '横2・縦2' }
+  ]
+
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div>
       <div className="brand-copy"><strong>コンパス戦績ノート</strong><span>RANK TRACKER</span></div>
       <div className="side-label">MENU</div>
       <nav>
-        <NavItem active={page === 'dashboard'} icon={<Gauge size={18}/>} label="ホーム" onClick={() => setPage('dashboard')} />
-        <NavItem active={page === 'add'} icon={<Plus size={18}/>} label="試合を記録" onClick={startNewMatch} />
-        <NavItem active={page === 'history'} icon={<History size={18}/>} label="戦績一覧" onClick={() => setPage('history')} />
-        <NavItem active={page === 'heroStats' || page === 'heroDetail'} icon={<Trophy size={18}/>} label="ヒーロー詳細ログ" onClick={() => setPage('heroStats')} />
-        <NavItem active={page === 'settings'} icon={<Settings size={18}/>} label="設定・その他" onClick={() => setPage('settings')} />
+        {orderedNavigationEntries.map(item => <NavItem key={item.key} active={page === item.key || (item.key === 'heroStats' && page === 'heroDetail')} icon={item.icon} label={item.label} onClick={item.action} />)}
       </nav>
       <div className="sidebar-foot"><Shield size={15}/> {cloud ? `クラウド同期：${cloud.syncStatus}` : 'この端末に保存'}</div>
     </aside>
     <main className="main-content">
       <header className="topbar">
         <div><h1>{({ dashboard: 'ホーム', add: '試合を記録', history: '戦績一覧', settings: '設定・その他', heroStats: 'ヒーロー詳細ログ', heroDetail: 'ヒーロー詳細ログ' } as Record<Page, string>)[page]}</h1></div>
-        <button className="primary-button top-add" onClick={startNewMatch}><Plus size={17}/> 試合を追加</button>
+        <div className="topbar-actions">
+          {page === 'dashboard' && <button type="button" className="secondary-button dashboard-edit-trigger" onClick={() => { setDashboardEditorTab('home'); setDashboardEditorOpen(true) }}><Pencil size={15}/> ホーム・メニューの編集</button>}
+          <button className="primary-button top-add" onClick={startNewMatch}><Plus size={17}/> 試合を追加</button>
+        </div>
       </header>
 
       {page === 'dashboard' && <section className="page-stack">
-        <div className="stats-grid dashboard-stats-grid">
-          <div className="stat-card current-rank-stat-card"><div className="stat-top"><span>現在のランク</span><span className="stat-icon"><BarChart3 size={19}/></span></div><strong>{`S${currentRankState.tier} · ${currentRankState.points}pt`}</strong><small>{store.activeSeason ?? 'シーズン未設定'}</small></div>
-          <StatCard icon={<Trophy size={19}/>} label="今日の勝率" value={todayWinRate} sub={`${todayWins}勝 · ${todayLosses}敗`} />
-          <StatCard icon={<Trophy size={19}/>} label="全体勝率" value={allTimeWinRate} sub={`${allWins}勝 · ${allLosses}敗`} />
-          <StatCard icon={<CalendarDays size={19}/>} label="総試合数" value={`${store.matches.length}`} sub="記録した試合" />
-          <StatCard icon={<Activity size={19}/>} label="現在の連続結果" value={currentStreak.count ? `${currentStreak.count}${currentStreak.result}` : '—'} sub={`最高連勝：${highestWinStreak}`} />
+        <div className="dashboard-widget-grid">
+          {(store.dashboardWidgets ?? defaultDashboardWidgets).map(widget => <DashboardWidgetCard
+            key={widget.id} widget={widget} store={store} currentRankState={currentRankState}
+            sortedMatches={sortedMatches} monthlyStats={monthlyStats}
+            onUpdate={updateDashboardWidget} onOpenHistory={() => setPage('history')}
+          />)}
+          {(store.dashboardWidgets ?? []).length === 0 && <div className="dashboard-empty-layout"><LayoutDashboard size={28}/><strong>ホーム画面が空です</strong><span>「ホーム・メニューの編集」から表示したい項目を追加できます。</span></div>}
         </div>
-        <div className="content-card">
-          <div className="section-heading"><div><h3>最近の試合</h3><p>直近に記録した試合を表示します</p></div><button className="text-button" onClick={() => setPage('history')}>すべて見る →</button></div>
-          {sortedMatches.length ? <MatchTable matches={sortedMatches.slice(0, 5)} onEdit={beginEditMatch} onDelete={deleteMatch}/> : <EmptyState onAdd={startNewMatch}/>}
-        </div>
-        <div className="analytics-grid">
-          <div className="content-card analytics-card">
-            <div className="section-heading"><div><h3>月別成績</h3><p>直近6か月分の記録を集計</p></div></div>
-            {monthlyStats.length ? <div className="table-wrap"><table className="mini-table"><thead><tr><th>月</th><th>試合</th><th>勝敗</th><th>勝率</th></tr></thead><tbody>{monthlyStats.map(m => <tr key={m.month}><td>{m.month}</td><td>{m.total}</td><td>{m.wins}勝 {m.losses}敗{m.draws ? ` ${m.draws}分` : ''}</td><td className="rate-cell">{m.rate}</td></tr>)}</tbody></table></div> : <p className="empty-inline">試合を記録すると月別成績が表示されます。</p>}
-          </div>
-          <div className="content-card analytics-card">
-            <div className="section-heading"><div><h3>ヒーロー別成績</h3><p>使用回数の多い順</p></div></div>
-            {heroStats.length ? <div className="table-wrap"><table className="mini-table"><thead><tr><th>ヒーロー</th><th>試合</th><th>勝率</th></tr></thead><tbody>{heroStats.slice(0, 6).map(h => <tr key={h.name}><td><span className="mini-hero-name">{h.name}</span><small className="mini-hero-role">{h.role}</small></td><td>{h.total}</td><td className="rate-cell">{h.rate}</td></tr>)}</tbody></table></div> : <p className="empty-inline">試合を記録するとヒーロー別成績が表示されます。</p>}
-          </div>
-        </div>
-        <div className="hint-row"><Shield size={17}/><span>{cloud ? 'ログイン中のアカウントに記録を同期します。別の端末でも同じアカウントでログインしてください。' : '端末を変える前にバックアップを保存してください。'}</span></div>
+        <div className="hint-row"><Shield size={17}/><span>{cloud ? 'ログイン中のアカウントにホーム画面と試合記録を同期します。別の端末でも同じ配置を利用できます。' : '端末を変える前にバックアップを保存してください。'}</span></div>
       </section>}
 
       {page === 'add' && <section className="content-card form-card">
@@ -1196,6 +1367,77 @@ ${result.data.text ?? ''}`)
       </section>}
       <footer className="app-footer">コンパス戦績ノート <span>·</span> Version 0.2.0</footer>
     </main>
+      {dashboardEditorOpen && <div className="dashboard-editor-backdrop" role="presentation" onClick={() => setDashboardEditorOpen(false)}>
+        <section className="dashboard-editor-modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-editor-title" onClick={event => event.stopPropagation()}>
+          <header className="dashboard-editor-header">
+            <div><span className="dashboard-editor-eyebrow">PERSONALIZE YOUR TRACKER</span><h2 id="dashboard-editor-title">ホーム・メニューの編集</h2><p>配置や表示項目は自動で保存されます。</p></div>
+            <button type="button" className="icon-button dashboard-editor-close" aria-label="編集を閉じる" onClick={() => setDashboardEditorOpen(false)}><X size={19}/></button>
+          </header>
+          <div className="dashboard-editor-tabs" role="tablist" aria-label="編集する場所">
+            <button type="button" role="tab" aria-selected={dashboardEditorTab === 'home'} className={dashboardEditorTab === 'home' ? 'active' : ''} onClick={() => setDashboardEditorTab('home')}><LayoutDashboard size={16}/> ホーム画面</button>
+            <button type="button" role="tab" aria-selected={dashboardEditorTab === 'menu'} className={dashboardEditorTab === 'menu' ? 'active' : ''} onClick={() => setDashboardEditorTab('menu')}><Menu size={16}/> メニュー欄</button>
+          </div>
+          {dashboardEditorTab === 'home' ? <div className="dashboard-editor-content">
+            <section className="dashboard-editor-section">
+              <div className="dashboard-editor-section-heading"><div><h3>配置中の項目</h3><p>つまみを長押ししてドラッグすると順番を変更できます。上下ボタンでも移動できます。</p></div><span className="editor-count">{(store.dashboardWidgets ?? []).length}項目</span></div>
+              <div className="dashboard-editor-grid">
+                {(store.dashboardWidgets ?? []).map((widget, index) => {
+                  const catalog = widgetCatalog.find(item => item.type === widget.type)!
+                  const dragKey = `home:${widget.id}`
+                  return <article key={widget.id} data-editor-sort-id={widget.id} data-editor-sort-scope="home" className={`dashboard-editor-widget ${widget.type === 'heroInfo' || widget.type === 'note' || widget.type === 'recentMatches' ? 'wide' : ''} ${editorDraggingKey === dragKey ? 'is-dragging' : ''}`}>
+                    <div className="dashboard-editor-widget-head">
+                      <button type="button" className="editor-drag-handle" aria-label={`${catalog.label}をドラッグして並べ替え`} onPointerDown={event => handleEditorPointerDown('home', widget.id, event)} onPointerMove={handleEditorPointerMove} onPointerUp={handleEditorPointerUp} onPointerCancel={handleEditorPointerCancel}><GripVertical size={18}/></button>
+                      <div className="dashboard-editor-widget-title"><strong>{catalog.label}</strong><span>{catalog.size}</span></div>
+                      <div className="editor-widget-actions">
+                        <button type="button" className="icon-button compact-editor-action" aria-label="上へ移動" title="上へ" disabled={index === 0} onClick={() => moveDashboardWidget(widget.id, -1)}><ChevronUp size={15}/></button>
+                        <button type="button" className="icon-button compact-editor-action" aria-label="下へ移動" title="下へ" disabled={index === (store.dashboardWidgets ?? []).length - 1} onClick={() => moveDashboardWidget(widget.id, 1)}><ChevronDown size={15}/></button>
+                        <button type="button" className="icon-button compact-editor-action remove-editor-action" aria-label={`${catalog.label}を削除`} title="ホームから削除" onClick={() => removeDashboardWidget(widget.id)}><Trash2 size={15}/></button>
+                      </div>
+                    </div>
+                    {widget.type === 'heroInfo' && <div className="editor-widget-settings"><label>表示するヒーロー</label><select value={widget.heroName ?? ''} onChange={event => updateDashboardWidget(widget.id, { heroName: event.target.value })}><option value="">ヒーローを選択してください</option>{store.heroes.map(hero => <option key={hero.name} value={hero.name}>{hero.name}（{hero.role}）</option>)}</select></div>}
+                    {widget.type === 'note' && <div className="editor-widget-settings note-editor-settings">
+                      <label className="editor-heading-toggle"><input type="checkbox" checked={Boolean(widget.showHeading)} onChange={event => updateDashboardWidget(widget.id, { showHeading: event.target.checked })}/> 見出しを追加</label>
+                      {widget.showHeading && <input value={widget.heading ?? ''} maxLength={80} placeholder="例：今月の目標" onChange={event => updateDashboardWidget(widget.id, { heading: event.target.value })}/>}
+                      <textarea rows={3} maxLength={3000} value={widget.body ?? ''} placeholder="自由に記載できます。例：11月中にリリカ使いを達成する" onChange={event => updateDashboardWidget(widget.id, { body: event.target.value })}/>
+                    </div>}
+                  </article>
+                })}
+                {(store.dashboardWidgets ?? []).length === 0 && <div className="editor-no-widgets">まだ項目がありません。下の一覧から追加してください。</div>}
+              </div>
+            </section>
+            <section className="dashboard-editor-section dashboard-widget-library-section">
+              <div className="dashboard-editor-section-heading"><div><h3>項目を追加</h3><p>追加後、上の配置一覧から並べ替えや内容の編集ができます。</p></div></div>
+              <div className="dashboard-widget-library">
+                {widgetCatalog.filter(item => repeatableDashboardWidgetTypes.includes(item.type) || !(store.dashboardWidgets ?? []).some(widget => widget.type === item.type)).map(item => <div className="dashboard-widget-library-item" key={item.type}>
+                  <div><strong>{item.label}</strong><span>{item.description}</span><small>{item.size}</small></div>
+                  <button type="button" className="secondary-button" onClick={() => addDashboardWidget(item.type)}><Plus size={15}/> 追加</button>
+                </div>)}
+                {widgetCatalog.every(item => !repeatableDashboardWidgetTypes.includes(item.type) && (store.dashboardWidgets ?? []).some(widget => widget.type === item.type)) && <p className="editor-library-complete">追加できる標準項目はすべて配置済みです。ヒーロー情報と自由記載は複数追加できます。</p>}
+              </div>
+            </section>
+          </div> : <div className="dashboard-editor-content menu-editor-content">
+            <section className="dashboard-editor-section">
+              <div className="dashboard-editor-section-heading"><div><h3>メニューの並び順</h3><p>ドラッグ、または上下ボタンで順番を変更できます。メニュー項目自体は削除されません。</p></div></div>
+              <div className="menu-editor-list">
+                {normalizeMenuOrder(store.menuOrder).map((key, index) => {
+                  const item = navigationEntries.find(entry => entry.key === key)!
+                  const dragKey = `menu:${key}`
+                  return <article key={key} data-editor-sort-id={key} data-editor-sort-scope="menu" className={`menu-editor-item ${editorDraggingKey === dragKey ? 'is-dragging' : ''}`}>
+                    <button type="button" className="editor-drag-handle" aria-label={`${item.label}をドラッグして並べ替え`} onPointerDown={event => handleEditorPointerDown('menu', key, event)} onPointerMove={handleEditorPointerMove} onPointerUp={handleEditorPointerUp} onPointerCancel={handleEditorPointerCancel}><GripVertical size={18}/></button>
+                    <span className="menu-editor-icon">{item.icon}</span><strong>{item.label}</strong>
+                    <div className="editor-widget-actions">
+                      <button type="button" className="icon-button compact-editor-action" aria-label="上へ移動" title="上へ" disabled={index === 0} onClick={() => moveMenuItem(key, -1)}><ChevronUp size={15}/></button>
+                      <button type="button" className="icon-button compact-editor-action" aria-label="下へ移動" title="下へ" disabled={index === normalizeMenuOrder(store.menuOrder).length - 1} onClick={() => moveMenuItem(key, 1)}><ChevronDown size={15}/></button>
+                    </div>
+                  </article>
+                })}
+              </div>
+            </section>
+          </div>}
+          <footer className="dashboard-editor-footer"><span><Shield size={14}/> 変更はこのアカウントに自動保存されます</span><button type="button" className="primary-button" onClick={() => setDashboardEditorOpen(false)}>完了</button></footer>
+        </section>
+      </div>}
+
     {toast && <div className="toast"><span className="toast-dot"/>{toast}<button onClick={() => setToast('')} aria-label="閉じる"><X size={15}/></button></div>}
   </div>
 }
@@ -1238,6 +1480,112 @@ function SearchableHeroDropdown({ value, heroes, onChange, placeholder }: { valu
       </div>
     </div>}
   </div>
+}
+
+type DashboardWidgetCardProps = {
+  widget: DashboardWidget
+  store: Store
+  currentRankState: RankState
+  sortedMatches: Match[]
+  monthlyStats: MonthlyStat[]
+  onUpdate: (id: string, changes: Partial<DashboardWidget>) => void
+  onOpenHistory: () => void
+}
+function DashboardWidgetCard({ widget, store, currentRankState, sortedMatches, monthlyStats, onUpdate, onOpenHistory }: DashboardWidgetCardProps) {
+  const wide = widget.type === 'heroInfo' || widget.type === 'note' || widget.type === 'recentMatches'
+  const tall = widget.type === 'recentMatches'
+  const period = widget.period ?? (widget.type === 'popularHero' ? 'all' : 'today')
+  const periodLabel = period === 'today' ? '今日' : period === 'month' ? '今月' : '全体'
+  const periodMatches = period === 'today'
+    ? sortedMatches.filter(match => match.playedAt.slice(0, 10) === today())
+    : period === 'month'
+      ? sortedMatches.filter(match => match.playedAt.slice(0, 7) === currentMonthKey())
+      : sortedMatches
+  const periodWins = periodMatches.filter(match => match.result === 'win').length
+  const periodLosses = periodMatches.filter(match => match.result === 'loss').length
+  const periodDraws = periodMatches.filter(match => match.result === 'draw').length
+  const winRate = percent(periodWins, periodWins + periodLosses)
+  const resultText = `${periodWins}勝 ${periodLosses}敗${periodDraws ? ` ${periodDraws}分` : ''}`
+  const allBaseUsage = Object.values(store.heroBaseStats ?? {}).reduce((sum, stat) => sum + stat.battles, 0)
+  const totalHeroUsage = periodMatches.length + (period === 'all' ? allBaseUsage : 0)
+  const popularHeroRows = store.heroes.map(item => {
+    const recent = period === 'today' ? sortedMatches.filter(match => match.heroName === item.name && match.playedAt.slice(0, 10) === today()) : period === 'month' ? sortedMatches.filter(match => match.heroName === item.name && match.playedAt.slice(0, 7) === currentMonthKey()) : sortedMatches.filter(match => match.heroName === item.name)
+    const count = recent.length + (period === 'all' ? (store.heroBaseStats?.[item.name]?.battles ?? 0) : 0)
+    return { name: item.name, count, rate: totalHeroUsage > 0 ? Math.round(count / totalHeroUsage * 100) : 0 }
+  }).filter(item => item.count > 0).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ja')).slice(0, 4)
+  const hero = widget.type === 'heroInfo' ? store.heroes.find(item => item.name === widget.heroName) : undefined
+  const heroBase = hero ? (store.heroBaseStats?.[hero.name] ?? { battles: 0, wins: 0 }) : { battles: 0, wins: 0 }
+  const heroMatches = hero ? store.matches.filter(match => match.heroName === hero.name) : []
+  const heroBattles = heroBase.battles + heroMatches.length
+  const heroWins = heroBase.wins + heroMatches.filter(match => match.result === 'win').length
+  const heroRate = percent(heroWins, heroBattles)
+  const nextMilestone = heroBattles < 1000 ? 1000 : heroBattles < 5000 ? 5000 : heroBattles < 10000 ? 10000 : null
+  const remaining = nextMilestone === null ? 0 : Math.max(0, nextMilestone - heroBattles)
+  const milestoneStart = nextMilestone === 1000 ? 0 : nextMilestone === 5000 ? 1000 : 5000
+  const progress = nextMilestone === null ? 100 : Math.max(0, Math.min(100, (heroBattles - milestoneStart) / (nextMilestone - milestoneStart) * 100))
+
+  return <article className={`dashboard-widget-card ${wide ? 'is-wide' : ''} ${tall ? 'is-tall' : ''} widget-${widget.type}`}>
+    {widget.type === 'rank' && <>
+      <div className="dashboard-widget-heading"><div><span className="widget-kicker">RANK STATUS</span><h3>現在のランク</h3></div><span className="dashboard-widget-icon"><BarChart3 size={18}/></span></div>
+      <strong className="dashboard-widget-primary-value">{`S${currentRankState.tier} · ${currentRankState.points}pt`}</strong>
+      <p className="dashboard-widget-subline">{store.activeSeason ?? 'シーズン未設定'}</p>
+    </>}
+    {widget.type === 'winRate' && <>
+      <div className="dashboard-widget-heading"><div><span className="widget-kicker">BATTLE RECORD</span><h3>勝率</h3></div><span className="dashboard-widget-icon"><Trophy size={18}/></span></div>
+      <div className="widget-period-tabs" aria-label="勝率の集計期間">{(['today', 'month', 'all'] as DashboardPeriod[]).map(value => <button type="button" key={value} className={period === value ? 'active' : ''} onClick={() => onUpdate(widget.id, { period: value })}>{value === 'today' ? '今日' : value === 'month' ? '今月' : '全体'}</button>)}</div>
+      <strong className="dashboard-widget-primary-value">{winRate}</strong>
+      <p className="dashboard-widget-subline">{periodMatches.length}試合 · {resultText}</p>
+    </>}
+    {widget.type === 'streak' && <>
+      <div className="dashboard-widget-heading"><div><span className="widget-kicker">CURRENT STREAK</span><h3>連勝数</h3></div><span className="dashboard-widget-icon"><Activity size={18}/></span></div>
+      {(() => {
+        const first = sortedMatches[0]?.result
+        let count = 0
+        if (first === 'win' || first === 'loss') for (const match of sortedMatches) { if (match.result !== first) break; count++ }
+        const current = first === 'win' ? `${count}連勝` : first === 'loss' ? `${count}連敗` : '—'
+        let run = 0, highest = 0
+        for (const match of [...sortedMatches].reverse()) { if (match.result === 'win') { run++; highest = Math.max(highest, run) } else run = 0 }
+        return <><strong className="dashboard-widget-primary-value">{current}</strong><p className="dashboard-widget-subline">最高連勝：{highest}</p></>
+      })()}
+    </>}
+    {widget.type === 'popularHero' && <>
+      <div className="dashboard-widget-heading"><div><span className="widget-kicker">HERO USAGE</span><h3>使用率の高いヒーロー</h3></div><span className="dashboard-widget-icon"><Star size={18}/></span></div>
+      <div className="widget-period-tabs" aria-label="ヒーロー使用数の集計期間">{(['today', 'month', 'all'] as DashboardPeriod[]).map(value => <button type="button" key={value} className={period === value ? 'active' : ''} onClick={() => onUpdate(widget.id, { period: value })}>{value === 'today' ? '今日' : value === 'month' ? '今月' : '全体'}</button>)}</div>
+      <div className="popular-hero-list">
+        {popularHeroRows.map((item, index) => <div className="popular-hero-row" key={item.name}><span className="popular-hero-rank">{index + 1}</span><strong>{item.name}</strong><span>{item.count.toLocaleString()}回 · {item.rate}%</span></div>)}
+        {popularHeroRows.length === 0 && <p className="dashboard-widget-empty">この期間の使用記録はありません。</p>}
+      </div>
+    </>}
+    {widget.type === 'heroInfo' && <>
+      <div className="dashboard-widget-heading"><div><span className="widget-kicker">HERO PROFILE</span><h3>{hero?.name ?? 'ヒーロー情報'}</h3></div>{hero && <span className="hero-role-chip">{hero.role}</span>}</div>
+      {hero ? <>
+        <div className="hero-info-metrics"><div><span>勝率</span><strong>{heroRate}</strong></div><div><span>使用数</span><strong>{heroBattles.toLocaleString()}回</strong></div><div><span>勝ち数</span><strong>{heroWins.toLocaleString()}勝</strong></div></div>
+        <div className="hero-title-progress"><div className="hero-title-progress-label"><span>{heroBattles >= 10000 ? `万戦${hero.name}使い 達成` : heroBattles >= 5000 ? `殿堂入り${hero.name}使い 達成` : heroBattles >= 1000 ? `${hero.name}使い 達成` : `${hero.name}使いまであと${remaining.toLocaleString()}戦`}</span><strong>{Math.floor(progress)}%</strong></div><div className="hero-title-progress-track"><span style={{ width: `${progress}%` }}/></div>
+          {heroBattles >= 10000 ? <small>万戦称号を達成しています。</small> : heroBattles >= 5000 ? <small>万戦{hero.name}使いまであと{remaining.toLocaleString()}戦</small> : heroBattles >= 1000 ? <small>殿堂入りまであと{remaining.toLocaleString()}戦 · 万戦まであと{(10000 - heroBattles).toLocaleString()}戦</small> : <small>1,000回使用で「{hero.name}使い」を獲得</small>}
+        </div>
+      </> : <p className="dashboard-widget-empty">編集画面から表示するヒーローを選択してください。</p>}
+    </>}
+    {widget.type === 'note' && <>
+      {widget.showHeading && widget.heading?.trim() && <span className="note-widget-heading">{widget.heading}</span>}
+      <p className={`note-widget-body ${widget.body?.trim() ? '' : 'is-empty'}`}>{widget.body?.trim() || '編集画面から目標やメモを入力できます。'}</p>
+    </>}
+    {widget.type === 'monthly' && <>
+      <div className="dashboard-widget-heading"><div><span className="widget-kicker">MONTHLY RECORD</span><h3>月別成績</h3></div><span className="dashboard-widget-icon"><CalendarDays size={18}/></span></div>
+      <div className="monthly-widget-track" aria-label="直近6か月の月別成績を左右にスライドして表示">{monthlyStats.map(item => <div className="monthly-widget-month" key={item.month}>
+        <strong>{`${Number(item.month.slice(5, 7))}月`}</strong><span>{item.month.slice(0, 4)}年</span>
+        <div className="monthly-widget-rate">{item.rate}</div><small>{item.total}試合 · {item.wins}勝 {item.losses}敗{item.draws ? ` ${item.draws}分` : ''}</small>
+      </div>)}</div>
+      <p className="monthly-widget-hint">左右にスライドして過去の月を確認</p>
+    </>}
+    {widget.type === 'recentMatches' && <>
+      <div className="dashboard-widget-heading"><div><span className="widget-kicker">LATEST BATTLES</span><h3>直近の試合履歴</h3></div><button type="button" className="text-button" onClick={onOpenHistory}>すべて見る →</button></div>
+      {sortedMatches.length ? <div className="recent-widget-list">{sortedMatches.slice(0, 5).map(match => <div className="recent-widget-row" key={match.id}>
+        <div className="recent-widget-date">{formatDateTime(match.playedAt)}</div>
+        <div className="recent-widget-main"><strong>{match.heroName}</strong><span>{match.mode ?? 'バトアリ'} · {match.mapName}</span></div>
+        <span className={`result-pill ${match.result}`}>{resultLabel(match.result)}</span>
+      </div>)}</div> : <p className="dashboard-widget-empty">試合を記録すると、ここに履歴が表示されます。</p>}
+    </>}
+  </article>
 }
 
 function NavItem({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
