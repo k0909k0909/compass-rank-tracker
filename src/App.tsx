@@ -394,7 +394,6 @@ function TrackerApp() {
   const [historyMonth, setHistoryMonth] = useState('all')
   const [historyMode, setHistoryMode] = useState<'all' | Mode>('all')
   const [selectedHeroDetailName, setSelectedHeroDetailName] = useState(savedDraft?.selectedHeroDetailName ?? '')
-  const [heroBaseDrafts, setHeroBaseDrafts] = useState<Record<string, { battles: string; wins: string }>>({})
   const [heroDetailMode, setHeroDetailMode] = useState<'all' | Mode>('all')
   const [heroDetailRecentCount, setHeroDetailRecentCount] = useState<'all' | '10' | '30' | '50' | '100'>('all')
   const [heroDetailSection, setHeroDetailSection] = useState<HeroDetailSection>('map')
@@ -731,34 +730,38 @@ function TrackerApp() {
     if (!window.confirm('この試合記録を削除しますか？')) return
     setStore(s => ({ ...s, matches: s.matches.filter(m => m.id !== id) }))
   }
-  function updateHeroBaseDraft(name: string, field: 'battles' | 'wins', value: string) {
-    const base = store.heroBaseStats?.[name] ?? { battles: 0, wins: 0 }
-    setHeroBaseDrafts(current => ({
-      ...current,
-      [name]: {
-        battles: current[name]?.battles ?? String(base.battles),
-        wins: current[name]?.wins ?? String(base.wins),
-        [field]: value
-      }
-    }))
-  }
-  function saveHeroBaseStats(name: string) {
-    const base = storeRef.current.heroBaseStats?.[name] ?? { battles: 0, wins: 0 }
-    const draft = heroBaseDrafts[name] ?? { battles: String(base.battles), wins: String(base.wins) }
-    const battles = Number(draft.battles)
-    const wins = Number(draft.wins)
-    if (!Number.isInteger(battles) || battles < 0 || !Number.isInteger(wins) || wins < 0 || wins > battles) {
+  // 入力値は過去分ではなく、アプリ内の記録を含めた現在の合計値です。
+  // 保存時にアプリ内記録分を差し引き、差分を heroBaseStats に補正値として保存します。
+  // heroBaseStats は既存バックアップとの互換性を保ったまま、正負の補正値を保持します。
+  // hero-total-edit-v2
+  function editHeroTotalStats(name: string) {
+    const summary = heroSummaryRows.find(hero => hero.name === name)
+    if (!summary) return
+    const battlesText = window.prompt(`${name} の合計試合数を入力してください`, String(summary.totalBattles))
+    if (battlesText === null) return
+    const winsText = window.prompt(`${name} の合計勝ち数を入力してください`, String(summary.totalWins))
+    if (winsText === null) return
+    if (!battlesText.trim() || !winsText.trim()) {
+      notify('試合数と勝ち数を入力してください')
+      return
+    }
+    const totalBattles = Number(battlesText)
+    const totalWins = Number(winsText)
+    if (!Number.isSafeInteger(totalBattles) || totalBattles < 0
+      || !Number.isSafeInteger(totalWins) || totalWins < 0 || totalWins > totalBattles) {
       notify('試合数・勝ち数は0以上の整数で、勝ち数は試合数以下にしてください')
       return
     }
+    const recorded = storeRef.current.matches.filter(match => match.heroName === name)
+    const recordedWins = recorded.filter(match => match.result === 'win').length
     const heroBaseStats = { ...(storeRef.current.heroBaseStats ?? {}) }
-    if (battles === 0 && wins === 0) delete heroBaseStats[name]
-    else heroBaseStats[name] = { battles, wins }
+    const adjustment = { battles: totalBattles - recorded.length, wins: totalWins - recordedWins }
+    if (adjustment.battles === 0 && adjustment.wins === 0) delete heroBaseStats[name]
+    else heroBaseStats[name] = adjustment
     const updated: Store = { ...storeRef.current, heroBaseStats }
     storeRef.current = updated
     setStore(updated)
-    setHeroBaseDrafts(current => ({ ...current, [name]: { battles: String(battles), wins: String(wins) } }))
-    notify(`${name} の過去分データを保存しました`)
+    notify(`${name} の合計成績を修正しました`)
   }
   function openHeroDetail(name: string) {
     setSelectedHeroDetailName(name)
@@ -1055,17 +1058,17 @@ ${result.data.text ?? ''}`)
 
       {page === 'heroStats' && <section className="page-stack hero-log-page">
         <div className="content-card">
-          <div className="section-heading"><div><h3>ヒーロー別の累計成績</h3><p>過去分の数値と、このアプリで記録した試合を合算して表示します。</p></div><div className="round-icon"><Trophy size={20}/></div></div>
-          <p className="hero-log-explanation">「過去分」はアプリを使い始める前の累計です。過去分の試合数・勝ち数を入力して保存すると、今後このアプリで記録した試合数・勝ち数が自動で加算されます。勝率は合計勝ち数 ÷ 合計試合数です。</p>
-          <div className="table-wrap hero-log-table-wrap"><table className="hero-log-table"><thead><tr><th>ヒーロー</th><th>過去分 試合数</th><th>過去分 勝ち数</th><th>合計試合数</th><th>合計勝ち数</th><th>勝率</th><th>詳細</th></tr></thead><tbody>
+          <div className="section-heading"><div><h3>ヒーロー別の合計成績</h3><p>アプリ内の試合記録を含めた現在の合計です。</p></div><div className="round-icon"><Trophy size={20}/></div></div>
+          <div className="table-wrap hero-log-table-wrap"><table className="hero-log-table hero-log-main-table"><thead><tr><th>ヒーロー</th><th>試合数</th><th>勝ち数</th><th>勝率</th><th>操作</th></tr></thead><tbody>
             {heroSummaryRows.map(hero => <tr key={hero.name}>
               <td><div className="hero-log-name"><strong>{hero.name}</strong><small>{hero.role}</small></div></td>
-              <td><input className="hero-log-number-input" type="number" min="0" step="1" inputMode="numeric" aria-label={`${hero.name}の過去分試合数`} value={heroBaseDrafts[hero.name]?.battles ?? String(hero.baseBattles)} onChange={event => updateHeroBaseDraft(hero.name, 'battles', event.target.value)}/></td>
-              <td><input className="hero-log-number-input" type="number" min="0" step="1" inputMode="numeric" aria-label={`${hero.name}の過去分勝ち数`} value={heroBaseDrafts[hero.name]?.wins ?? String(hero.baseWins)} onChange={event => updateHeroBaseDraft(hero.name, 'wins', event.target.value)}/></td>
               <td className="hero-log-number-cell">{hero.totalBattles.toLocaleString()}</td>
               <td className="hero-log-number-cell">{hero.totalWins.toLocaleString()}</td>
               <td className="hero-log-rate">{hero.winRate === null ? '—' : `${hero.winRate.toFixed(1)}%`}</td>
-              <td><div className="hero-log-row-actions"><button className="secondary-button hero-log-save-button" onClick={() => saveHeroBaseStats(hero.name)}>過去分を保存</button><button className="primary-button hero-log-detail-button" onClick={() => openHeroDetail(hero.name)}>詳細を見る</button></div></td>
+              <td><div className="hero-log-row-actions">
+                <button type="button" className="secondary-button hero-log-detail-button" onClick={() => openHeroDetail(hero.name)}>詳細</button>
+                <button type="button" className="icon-button hero-log-edit-button" aria-label={`${hero.name}の合計成績を修正`} title="合計成績を修正" onClick={() => editHeroTotalStats(hero.name)}><Pencil size={16}/></button>
+              </div></td>
             </tr>)}
           </tbody></table></div>
         </div>
