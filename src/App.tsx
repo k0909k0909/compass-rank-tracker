@@ -399,6 +399,9 @@ function TrackerApp() {
   const [heroDetailSection, setHeroDetailSection] = useState<HeroDetailSection>('map')
   const [heroDetailSortKey, setHeroDetailSortKey] = useState<HeroDetailSortKey>('winRate')
   const [heroDetailSortDirection, setHeroDetailSortDirection] = useState<'asc' | 'desc'>('desc')
+  const [heroSummarySortKey, setHeroSummarySortKey] = useState<'default' | 'battles' | 'wins' | 'winRate'>('default')
+  const [heroSummarySortDirection, setHeroSummarySortDirection] = useState<'asc' | 'desc'>('desc')
+  const [heroSummaryRecentCount, setHeroSummaryRecentCount] = useState<'all' | '10' | '50' | '100'>('all')
   const [heroRoleFilter, setHeroRoleFilter] = useState<'all' | Role>('all')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [recordSlide, setRecordSlide] = useState<1 | 2>(() => savedDraft?.recordSlide === 2 ? 2 : 1)
@@ -506,13 +509,32 @@ function TrackerApp() {
     return [...buckets.entries()].map(([name, matches]) => ({ name, role: matches[0].heroRole, total: matches.length, wins: matches.filter(m => m.result === 'win').length, losses: matches.filter(m => m.result === 'loss').length, draws: matches.filter(m => m.result === 'draw').length, rate: percent(matches.filter(m => m.result === 'win').length, matches.filter(m => m.result !== 'draw').length) })).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'ja'))
   }, [store.matches])
   const availableMonths = useMemo(() => [...new Set(store.matches.map(m => m.playedAt.slice(0, 7)))].sort((a, b) => b.localeCompare(a)), [store.matches])
-  const heroSummaryRows = useMemo(() => store.heroes.map(hero => {
-    const base = store.heroBaseStats?.[hero.name] ?? { battles: 0, wins: 0 }
-    const recorded = store.matches.filter(match => match.heroName === hero.name)
-    const battles = base.battles + recorded.length
-    const wins = base.wins + recorded.filter(match => match.result === 'win').length
-    return { ...hero, baseBattles: base.battles, baseWins: base.wins, totalBattles: battles, totalWins: wins, winRate: battles > 0 ? wins / battles * 100 : null }
-  }).sort((a, b) => (heroOrderIndex.get(a.name) ?? Number.MAX_SAFE_INTEGER) - (heroOrderIndex.get(b.name) ?? Number.MAX_SAFE_INTEGER)), [store.heroes, store.heroBaseStats, store.matches])
+  const heroSummaryRows = useMemo(() => {
+    const rows = store.heroes.map(hero => {
+      const base = store.heroBaseStats?.[hero.name] ?? { battles: 0, wins: 0 }
+      let recorded = store.matches.filter(match => match.heroName === hero.name)
+        .sort((a, b) => b.playedAt.localeCompare(a.playedAt))
+      if (heroSummaryRecentCount !== 'all') recorded = recorded.slice(0, Number(heroSummaryRecentCount))
+      // 日付のない手入力累計は、直近N戦の集計には含めません。
+      const includeBase = heroSummaryRecentCount === 'all'
+      const battles = (includeBase ? base.battles : 0) + recorded.length
+      const wins = (includeBase ? base.wins : 0) + recorded.filter(match => match.result === 'win').length
+      return { ...hero, totalBattles: battles, totalWins: wins, winRate: battles > 0 ? wins / battles * 100 : null }
+    })
+    const implementationOrder = (a: typeof rows[number], b: typeof rows[number]) =>
+      (heroOrderIndex.get(a.name) ?? Number.MAX_SAFE_INTEGER) - (heroOrderIndex.get(b.name) ?? Number.MAX_SAFE_INTEGER)
+    if (heroSummarySortKey === 'default') return rows.sort(implementationOrder)
+    return rows.sort((a, b) => {
+      const av = heroSummarySortKey === 'battles' ? a.totalBattles : heroSummarySortKey === 'wins' ? a.totalWins : a.winRate
+      const bv = heroSummarySortKey === 'battles' ? b.totalBattles : heroSummarySortKey === 'wins' ? b.totalWins : b.winRate
+      if (av === null || bv === null) {
+        if (av === bv) return implementationOrder(a, b)
+        return av === null ? 1 : -1
+      }
+      const difference = av - bv
+      return difference === 0 ? implementationOrder(a, b) : heroSummarySortDirection === 'asc' ? difference : -difference
+    })
+  }, [store.heroes, store.heroBaseStats, store.matches, heroSummaryRecentCount, heroSummarySortKey, heroSummarySortDirection])
   const selectedHeroDetail = store.heroes.find(hero => hero.name === selectedHeroDetailName)
   const selectedHeroDetailRecords = useMemo(() => {
     let records = store.matches.filter(match => match.heroName === selectedHeroDetailName && (heroDetailMode === 'all' || (match.mode ?? 'バトアリ') === heroDetailMode))
@@ -1059,7 +1081,23 @@ ${result.data.text ?? ''}`)
       {page === 'heroStats' && <section className="page-stack hero-log-page">
         <div className="content-card">
           <div className="section-heading"><div><h3>ヒーロー別の合計成績</h3><p>アプリ内の試合記録を含めた現在の合計です。</p></div><div className="round-icon"><Trophy size={20}/></div></div>
-          <div className="table-wrap hero-log-table-wrap"><table className="hero-log-table hero-log-main-table"><thead><tr><th>ヒーロー</th><th>試合数</th><th>勝ち数</th><th>勝率</th><th>操作</th></tr></thead><tbody>
+          <div className="hero-summary-toolbar">
+            <button type="button" className="secondary-button hero-summary-reset-button" onClick={() => { setHeroSummarySortKey('default'); setHeroSummarySortDirection('desc') }}>ソートリセット</button>
+            <div className="hero-summary-filter-buttons" aria-label="集計する試合数">
+              {(['all', '10', '50', '100'] as const).map(count => <button key={count} type="button"
+                className={`hero-summary-filter-button ${heroSummaryRecentCount === count ? 'active' : ''}`}
+                onClick={() => setHeroSummaryRecentCount(count)}
+              >{count === 'all' ? '全試合' : `${count}戦`}</button>)}
+            </div>
+          </div>
+          {heroSummaryRecentCount !== 'all' && <p className="hero-summary-filter-note">各ヒーローの直近{heroSummaryRecentCount}戦を集計しています。手入力した過去の累計成績は、試合日時がないためこの絞り込みには含まれません。</p>}
+          <div className="table-wrap hero-log-table-wrap"><table className="hero-log-table hero-log-main-table"><thead><tr>
+            <th>ヒーロー</th>
+            <th><button type="button" className="hero-summary-sort-button" onClick={() => { setHeroSummarySortKey('battles'); setHeroSummarySortDirection(current => heroSummarySortKey === 'battles' ? (current === 'desc' ? 'asc' : 'desc') : 'desc') }}>試合数 {heroSummarySortKey === 'battles' ? (heroSummarySortDirection === 'desc' ? '↓' : '↑') : '↕'}</button></th>
+            <th><button type="button" className="hero-summary-sort-button" onClick={() => { setHeroSummarySortKey('wins'); setHeroSummarySortDirection(current => heroSummarySortKey === 'wins' ? (current === 'desc' ? 'asc' : 'desc') : 'desc') }}>勝ち数 {heroSummarySortKey === 'wins' ? (heroSummarySortDirection === 'desc' ? '↓' : '↑') : '↕'}</button></th>
+            <th><button type="button" className="hero-summary-sort-button" onClick={() => { setHeroSummarySortKey('winRate'); setHeroSummarySortDirection(current => heroSummarySortKey === 'winRate' ? (current === 'desc' ? 'asc' : 'desc') : 'desc') }}>勝率 {heroSummarySortKey === 'winRate' ? (heroSummarySortDirection === 'desc' ? '↓' : '↑') : '↕'}</button></th>
+            <th>操作</th>
+          </tr></thead><tbody>
             {heroSummaryRows.map(hero => <tr key={hero.name}>
               <td><div className="hero-log-name"><strong>{hero.name}</strong><small>{hero.role}</small></div></td>
               <td className="hero-log-number-cell">{hero.totalBattles.toLocaleString()}</td>
