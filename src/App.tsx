@@ -1364,15 +1364,10 @@ ${result.data.text ?? ''}`)
               <div data-dashboard-widget-id={widget.id} className={`dashboard-widget-sortable ${wide ? 'is-wide' : ''} ${tall ? 'is-tall' : ''} ${dashboardDraggingId === widget.id ? 'is-dragging' : ''} ${dashboardDropTargetId === widget.id ? 'is-drop-target' : ''}`}>
                 <DashboardWidgetCard widget={widget} carouselWidgets={group} store={store} currentRankState={currentRankState}
                   sortedMatches={sortedMatches} monthlyStats={monthlyStats} editMode={dashboardEditMode}
-                  onUpdate={updateDashboardWidget} onRemove={removeDashboardWidget} onOpenHistory={() => setPage('history')}
+                  onUpdate={updateDashboardWidget} onRemove={removeDashboardWidget} onAdd={addDashboardWidget} onOpenHistory={() => setPage('history')}
                   onDragStart={handleDashboardDragStart} onDragMove={handleDashboardDragMove} onDragEnd={handleDashboardDragEnd} onDragCancel={handleDashboardDragCancel}
                 />
               </div>
-              {repeatableGroup && group.length === 1 && <div className="dashboard-widget-add-tile">
-                <button type="button" aria-label={widget.type === 'heroInfo' ? 'ヒーローの情報を追加' : 'メモ等を追加'} onClick={() => addDashboardWidget(widget.type)}>
-                  <Plus size={23}/><span>追加</span>
-                </button>
-              </div>}
             </Fragment>
           })}
           {dashboardWidgetGroups.length === 0 && <div className="dashboard-empty-layout"><LayoutDashboard size={28}/><strong>ホーム画面が空です</strong><span>編集モードの「項目を追加」から表示したい項目を追加できます。</span></div>}
@@ -1700,13 +1695,14 @@ type DashboardWidgetCardProps = {
   editMode?: boolean
   onUpdate: (id: string, changes: Partial<DashboardWidget>) => void
   onRemove?: (id: string) => void
+  onAdd?: (type: DashboardWidgetType) => void
   onOpenHistory: () => void
   onDragStart?: (id: string, event: React.PointerEvent<HTMLButtonElement>) => void
   onDragMove?: (event: React.PointerEvent<HTMLButtonElement>) => void
   onDragEnd?: (event: React.PointerEvent<HTMLButtonElement>) => void
   onDragCancel?: () => void
 }
-function DashboardWidgetCard({ widget, carouselWidgets, store, currentRankState, sortedMatches, monthlyStats, editMode = false, onUpdate, onRemove, onOpenHistory, onDragStart, onDragMove, onDragEnd, onDragCancel }: DashboardWidgetCardProps) {
+function DashboardWidgetCard({ widget, carouselWidgets, store, currentRankState, sortedMatches, monthlyStats, editMode = false, onUpdate, onRemove, onAdd, onOpenHistory, onDragStart, onDragMove, onDragEnd, onDragCancel }: DashboardWidgetCardProps) {
   const slides = carouselWidgets?.length ? carouselWidgets : [widget]
   const [slideIndex, setSlideIndex] = useState(0)
   const [noteEditing, setNoteEditing] = useState(false)
@@ -1819,7 +1815,13 @@ function DashboardWidgetCard({ widget, carouselWidgets, store, currentRankState,
           {heroBattles >= 10000 ? <small>万戦称号を達成しています。</small> : heroBattles >= 5000 ? <small>万戦{hero.name}使いまであと{remaining.toLocaleString()}戦</small> : heroBattles >= 1000 ? <small>殿堂入りまであと{remaining.toLocaleString()}戦 · 万戦まであと{(10000 - heroBattles).toLocaleString()}戦</small> : <small>1,000回使用で「{hero.name}使い」を獲得</small>}
         </div>
       </> : <p className="dashboard-widget-empty">上の検索欄から表示するヒーローを選択してください。</p>}
-      {canCarousel && <div className="widget-carousel-controls"><div className="widget-carousel-dots">{slides.map((item, index) => <button type="button" key={item.id} className={slideIndex === index ? 'active' : ''} aria-label={`${index + 1}体目を表示`} onClick={() => setSlideIndex(index)}/>)}</div><div className="widget-carousel-arrows"><button type="button" aria-label="前のヒーロー" onClick={() => changeSlide(-1)}><ChevronLeft size={16}/></button><span>{slideIndex + 1} / {slides.length}</span><button type="button" aria-label="次のヒーロー" onClick={() => changeSlide(1)}><ChevronRight size={16}/></button><button type="button" className="icon-button widget-carousel-remove" aria-label="表示中のヒーロー情報を削除" title="このヒーロー情報を削除" onClick={() => onRemove?.(currentSlide.id)}><Trash2 size={14}/></button></div></div>}
+      {(canCarousel || slides.length < 3) && <div className="widget-carousel-controls">
+        <div className="widget-carousel-dots">{canCarousel ? slides.map((item, index) => <button type="button" key={item.id} className={slideIndex === index ? 'active' : ''} aria-label={`${index + 1}体目を表示`} onClick={() => setSlideIndex(index)}/>) : <span className="widget-carousel-dots-spacer"/>}</div>
+        <div className="widget-carousel-arrows">
+          {canCarousel && <><button type="button" aria-label="前のヒーロー" onClick={() => changeSlide(-1)}><ChevronLeft size={16}/></button><span>{slideIndex + 1} / {slides.length}</span><button type="button" aria-label="次のヒーロー" onClick={() => changeSlide(1)}><ChevronRight size={16}/></button><button type="button" className="icon-button widget-carousel-remove" aria-label="表示中のヒーロー情報を削除" title="このヒーロー情報を削除" onClick={() => onRemove?.(currentSlide.id)}><Trash2 size={14}/></button></>}
+          {slides.length < 3 && <button type="button" className="widget-carousel-add" aria-label="ヒーローの情報を追加" title="ヒーローの情報を追加" onClick={() => onAdd?.('heroInfo')}><Plus size={15}/></button>}
+        </div>
+      </div>}
     </>}
     {widget.type === 'note' && <>
       <div className="dashboard-widget-heading note-widget-header"><div>{currentSlide.showHeading && currentSlide.heading?.trim() ? <h3>{currentSlide.heading}</h3> : null}</div><button type="button" className="icon-button note-edit-trigger" aria-label="メモを編集" title="内容を編集" onClick={() => setNoteEditing(current => !current)}><Pencil size={15}/></button></div>
@@ -1829,7 +1831,13 @@ function DashboardWidgetCard({ widget, carouselWidgets, store, currentRankState,
         <textarea rows={4} maxLength={3000} value={currentSlide.body ?? ''} placeholder="例：○○までに○○使いを達成する" onChange={event => onUpdate(currentSlide.id, { body: event.target.value })}/>
         <button type="button" className="secondary-button note-editor-done" onClick={() => setNoteEditing(false)}>編集を閉じる</button>
       </div> : <p className={`note-widget-body ${currentSlide.body?.trim() ? '' : 'is-empty'}`}>{currentSlide.body?.trim() || '編集ボタンから目標やメモを入力できます。'}</p>}
-      {canCarousel && <div className="widget-carousel-controls"><div className="widget-carousel-dots">{slides.map((item, index) => <button type="button" key={item.id} className={slideIndex === index ? 'active' : ''} aria-label={`${index + 1}件目を表示`} onClick={() => setSlideIndex(index)}/>)}</div><div className="widget-carousel-arrows"><button type="button" aria-label="前のメモ" onClick={() => changeSlide(-1)}><ChevronLeft size={16}/></button><span>{slideIndex + 1} / {slides.length}</span><button type="button" aria-label="次のメモ" onClick={() => changeSlide(1)}><ChevronRight size={16}/></button><button type="button" className="icon-button widget-carousel-remove" aria-label="表示中のメモを削除" title="このメモを削除" onClick={() => onRemove?.(currentSlide.id)}><Trash2 size={14}/></button></div></div>}
+      {(canCarousel || slides.length < 3) && <div className="widget-carousel-controls">
+        <div className="widget-carousel-dots">{canCarousel ? slides.map((item, index) => <button type="button" key={item.id} className={slideIndex === index ? 'active' : ''} aria-label={`${index + 1}件目を表示`} onClick={() => setSlideIndex(index)}/>) : <span className="widget-carousel-dots-spacer"/>}</div>
+        <div className="widget-carousel-arrows">
+          {canCarousel && <><button type="button" aria-label="前のメモ" onClick={() => changeSlide(-1)}><ChevronLeft size={16}/></button><span>{slideIndex + 1} / {slides.length}</span><button type="button" aria-label="次のメモ" onClick={() => changeSlide(1)}><ChevronRight size={16}/></button><button type="button" className="icon-button widget-carousel-remove" aria-label="表示中のメモを削除" title="このメモを削除" onClick={() => onRemove?.(currentSlide.id)}><Trash2 size={14}/></button></>}
+          {slides.length < 3 && <button type="button" className="widget-carousel-add" aria-label="メモを追加" title="メモを追加" onClick={() => onAdd?.('note')}><Plus size={15}/></button>}
+        </div>
+      </div>}
     </>}
     {widget.type === 'monthly' && <>
       <div className="dashboard-widget-heading"><div><span className="widget-kicker">MONTHLY RECORD</span><h3>月別成績</h3></div><span className="dashboard-widget-icon"><CalendarDays size={18}/></span></div>

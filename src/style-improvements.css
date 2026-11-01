@@ -861,3 +861,23 @@ html[data-theme="light"] .mode-options .result-choice.selected.win {
   .demo-user-bar > span { text-align: left; line-height: 1.45; }
   .demo-user-bar button { padding: 5px 7px; font-size: 8px; }
 }
+
+
+/* INLINE ADD CONTROL FOR REPEATABLE DASHBOARD CARDS */
+.widget-carousel-dots-spacer { display: block; min-width: 1px; min-height: 8px; }
+.widget-carousel-arrows .widget-carousel-add {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 28px;
+  padding: 0;
+  border: 1px dashed var(--accent-line, #2e6470);
+  border-radius: 7px;
+  background: var(--accent-soft, #14313a);
+  color: var(--accent-strong, #35d4e4);
+}
+.widget-carousel-arrows .widget-carousel-add:hover {
+  border-style: solid;
+  border-color: var(--accent, #39e6f2);
+  background: var(--surface-raised, #141f30);
+}
