@@ -1162,6 +1162,16 @@ ${result.data.text ?? ''}`)
       setDashboardDraggingId(drag.id)
     }
     if (drag.moved) {
+      // ドラッグしたまま画面の上下端へ移動すると、ページを自動スクロールします。
+      const edge = 88
+      const bottomEdge = window.innerHeight - (window.innerWidth <= 700 ? 106 : 76)
+      if (event.clientY < edge) {
+        const speed = Math.min(22, Math.max(4, Math.ceil((edge - event.clientY) / 3)))
+        window.scrollBy({ top: -speed, left: 0, behavior: 'auto' })
+      } else if (event.clientY > bottomEdge) {
+        const speed = Math.min(22, Math.max(4, Math.ceil((event.clientY - bottomEdge) / 3)))
+        window.scrollBy({ top: speed, left: 0, behavior: 'auto' })
+      }
       const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-dashboard-widget-id]')
       const targetId = target?.dataset.dashboardWidgetId ?? ''
       setDashboardDropTargetId(targetId !== drag.id ? targetId : '')
@@ -1238,6 +1248,20 @@ ${result.data.text ?? ''}`)
       drag.moved = true
       setEditorDraggingKey(`${drag.scope}:${drag.id}`)
     }
+    if (drag.moved) {
+      const scrollContainer = event.currentTarget.closest<HTMLElement>('.dashboard-editor-content')
+      if (scrollContainer) {
+        const rect = scrollContainer.getBoundingClientRect()
+        const edge = 64
+        if (event.clientY < rect.top + edge) {
+          const speed = Math.min(20, Math.max(4, Math.ceil((rect.top + edge - event.clientY) / 3)))
+          scrollContainer.scrollTop -= speed
+        } else if (event.clientY > rect.bottom - edge) {
+          const speed = Math.min(20, Math.max(4, Math.ceil((event.clientY - (rect.bottom - edge)) / 3)))
+          scrollContainer.scrollTop += speed
+        }
+      }
+    }
   }
   function handleEditorPointerUp(event: React.PointerEvent<HTMLButtonElement>) {
     const drag = editorSortDragRef.current
@@ -1273,8 +1297,8 @@ ${result.data.text ?? ''}`)
     { type: 'winRate', label: '勝率', description: '今日・今月・全体を切り替え', size: '横1' },
     { type: 'streak', label: '連勝数', description: '現在の連勝・連敗と最高連勝', size: '横1' },
     { type: 'popularHero', label: '使用率の高いヒーロー', description: '今日・今月・全体を切り替え', size: '横1' },
-    { type: 'heroInfo', label: 'ヒーローの情報', description: '1件は横1。2件以上は横スライドで表示。ホーム上で変更可能', size: '横1／複数時は横2' },
-    { type: 'note', label: 'メモ等', description: '1件は横1。2件以上は横スライドで表示。ホーム上で編集可能', size: '横1／複数時は横2' },
+    { type: 'heroInfo', label: 'ヒーローの情報', description: 'ホーム上でヒーローを切り替え。複数登録時は横スライドで表示', size: '横2' },
+    { type: 'note', label: 'メモ等', description: 'ホーム上で内容を編集。複数登録時は横スライドで表示', size: '横2' },
     { type: 'monthly', label: '月別成績', description: '今月から直近6か月をスライド表示', size: '横1' },
     { type: 'recentMatches', label: '直近の試合履歴', description: '最新5試合。横2・縦2', size: '横2・縦2' }
   ]
@@ -1334,7 +1358,7 @@ ${result.data.text ?? ''}`)
             const widget = group[0]
             const repeatableGroup = repeatableDashboardWidgetTypes.includes(widget.type)
             const key = repeatableGroup ? `widget-group-${widget.type}` : widget.id
-            const wide = (repeatableGroup && group.length > 1) || widget.type === 'recentMatches'
+            const wide = repeatableGroup || widget.type === 'recentMatches'
             const tall = widget.type === 'recentMatches'
             return <Fragment key={key}>
               <div data-dashboard-widget-id={widget.id} className={`dashboard-widget-sortable ${wide ? 'is-wide' : ''} ${tall ? 'is-tall' : ''} ${dashboardDraggingId === widget.id ? 'is-dragging' : ''} ${dashboardDropTargetId === widget.id ? 'is-drop-target' : ''}`}>
@@ -1574,22 +1598,16 @@ ${result.data.text ?? ''}`)
                 {(store.dashboardWidgets ?? []).map((widget, index) => {
                   const catalog = widgetCatalog.find(item => item.type === widget.type)!
                   const dragKey = `home:${widget.id}`
-                  return <article key={widget.id} data-editor-sort-id={widget.id} data-editor-sort-scope="home" className={`dashboard-editor-widget ${widget.type === 'heroInfo' || widget.type === 'note' || widget.type === 'recentMatches' ? 'wide' : ''} ${editorDraggingKey === dragKey ? 'is-dragging' : ''}`}>
+                  return <article key={widget.id} data-editor-sort-id={widget.id} data-editor-sort-scope="home" className={`dashboard-editor-widget ${widget.type === 'recentMatches' ? 'wide' : ''} ${editorDraggingKey === dragKey ? 'is-dragging' : ''}`}>
                     <div className="dashboard-editor-widget-head">
                       <button type="button" className="editor-drag-handle" aria-label={`${catalog.label}をドラッグして並べ替え`} onPointerDown={event => handleEditorPointerDown('home', widget.id, event)} onPointerMove={handleEditorPointerMove} onPointerUp={handleEditorPointerUp} onPointerCancel={handleEditorPointerCancel}><GripVertical size={18}/></button>
-                      <div className="dashboard-editor-widget-title"><strong>{catalog.label}</strong><span>{catalog.size}</span></div>
+                      <div className="dashboard-editor-widget-title"><strong>{catalog.label}</strong></div>
                       <div className="editor-widget-actions">
                         <button type="button" className="icon-button compact-editor-action" aria-label="上へ移動" title="上へ" disabled={index === 0} onClick={() => moveDashboardWidget(widget.id, -1)}><ChevronUp size={15}/></button>
                         <button type="button" className="icon-button compact-editor-action" aria-label="下へ移動" title="下へ" disabled={index === (store.dashboardWidgets ?? []).length - 1} onClick={() => moveDashboardWidget(widget.id, 1)}><ChevronDown size={15}/></button>
                         <button type="button" className="icon-button compact-editor-action remove-editor-action" aria-label={`${catalog.label}を削除`} title="ホームから削除" onClick={() => removeDashboardWidget(widget.id)}><Trash2 size={15}/></button>
                       </div>
                     </div>
-                    {widget.type === 'heroInfo' && <div className="editor-widget-settings"><label>表示するヒーロー</label><select value={widget.heroName ?? ''} onChange={event => updateDashboardWidget(widget.id, { heroName: event.target.value })}><option value="">ヒーローを選択してください</option>{store.heroes.map(hero => <option key={hero.name} value={hero.name}>{hero.name}（{hero.role}）</option>)}</select></div>}
-                    {widget.type === 'note' && <div className="editor-widget-settings note-editor-settings">
-                      <label className="editor-heading-toggle"><input type="checkbox" checked={Boolean(widget.showHeading)} onChange={event => updateDashboardWidget(widget.id, { showHeading: event.target.checked })}/> 見出しを追加</label>
-                      {widget.showHeading && <input value={widget.heading ?? ''} maxLength={80} placeholder="例：今月の目標" onChange={event => updateDashboardWidget(widget.id, { heading: event.target.value })}/>}
-                      <textarea rows={3} maxLength={3000} value={widget.body ?? ''} placeholder="例：○○までに○○使いを達成する" onChange={event => updateDashboardWidget(widget.id, { body: event.target.value })}/>
-                    </div>}
                   </article>
                 })}
                 {(store.dashboardWidgets ?? []).length === 0 && <div className="editor-no-widgets">まだ項目がありません。下の一覧から追加してください。</div>}
@@ -1696,7 +1714,7 @@ function DashboardWidgetCard({ widget, carouselWidgets, store, currentRankState,
   useEffect(() => { setSlideIndex(index => Math.min(index, Math.max(0, slides.length - 1))) }, [slides.length])
   const currentSlide = slides[slideIndex] ?? widget
   useEffect(() => { setNoteEditing(false) }, [currentSlide.id])
-  const wide = ((widget.type === 'heroInfo' || widget.type === 'note') && slides.length > 1) || widget.type === 'recentMatches'
+  const wide = widget.type === 'heroInfo' || widget.type === 'note' || widget.type === 'recentMatches'
   const tall = widget.type === 'recentMatches'
   const period = widget.period ?? (widget.type === 'popularHero' ? 'all' : 'today')
   const periodMatches = period === 'today'
@@ -1945,7 +1963,7 @@ export default function App() {
 
   if (demoMode) return <><div className="cloud-user-bar demo-user-bar">{themeToggle}<span>デモモード · サンプルデータはこの端末内だけに保存されます</span><button type="button" onClick={() => setDemoMode(false)}>デモを終了</button></div><TrackerApp demoMode /></>
   if (!supabase) return <div className="auth-shell">{themeToggle}<div className="auth-card"><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><h1>クラウド同期の設定</h1><p>Supabase の接続情報がまだ設定されていません。公開設定後に、このアプリを利用できるようになります。</p><ol><li>Supabase プロジェクトを作成</li><li>SQL Editor で <code>supabase/migrations/001_initial_schema.sql</code> を実行</li><li>プロジェクトの URL と Publishable key をホスティング設定に登録</li></ol><p className="small-note">この設定画面は、接続情報を入力する前の状態です。</p></div></div>
-  if (!user) return <div className="auth-shell">{themeToggle}<form className="auth-card" onSubmit={submitAuth}><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><div className="eyebrow">RANK TRACKER CLOUD</div><h1>コンパス戦績ノート</h1><p>アカウントでログインすると、PC とスマホで記録を共有できます。</p><div className="field"><label>メールアドレス</label><input type="text" inputMode="email" required autoComplete="email" placeholder="メールアドレスまたは dummy" value={email} onChange={e => setEmail(e.target.value)} /></div><div className="field"><label>パスワード（6文字以上）</label><input type="password" required minLength={6} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} /></div><button className="primary-button auth-submit" type="submit">{mode === 'login' ? 'ログイン' : 'アカウントを作成'}</button><button className="text-button auth-switch" type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>{mode === 'login' ? '初めて使う方：アカウント作成' : 'すでにアカウントをお持ちの方：ログイン'}</button>{message && <p className="auth-message">{message}</p>}</form></div>
+  if (!user) return <div className="auth-shell">{themeToggle}<form className="auth-card" onSubmit={submitAuth}><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><div className="eyebrow">RANK TRACKER CLOUD</div><h1>コンパス戦績ノート</h1><p>アカウントでログインすると、PC とスマホで記録を共有できます。</p><div className="field"><label>メールアドレス</label><input type="text" inputMode="email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} /></div><div className="field"><label>パスワード（6文字以上）</label><input type="password" required minLength={6} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} /></div><button className="primary-button auth-submit" type="submit">{mode === 'login' ? 'ログイン' : 'アカウントを作成'}</button><button className="text-button auth-switch" type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>{mode === 'login' ? '初めて使う方：アカウント作成' : 'すでにアカウントをお持ちの方：ログイン'}</button>{message && <p className="auth-message">{message}</p>}</form></div>
   if (!ready) return <div className="auth-shell">{themeToggle}<div className="auth-card"><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><h1>クラウドデータを準備中</h1><p>{syncStatus}。しばらくお待ちください。</p>{message && <p className="auth-message">{message}</p>}<button className="secondary-button" onClick={() => supabase.auth.signOut()}>ログアウト</button></div></div>
   return <CloudContext.Provider value={{ saveCloudStore, syncStatus }}><><div className="cloud-user-bar">{themeToggle}<span className="cloud-login-status">ログイン中 · 同期：{syncStatus}</span><button className="logout-button" onClick={() => supabase.auth.signOut()}>ログアウト</button></div><TrackerApp /></></CloudContext.Provider>
 }
