@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { createWorker } from 'tesseract.js'
 import { createClient, type User } from '@supabase/supabase-js'
 import { Activity, BarChart3, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, FileUp, Gauge, GripVertical, History, LayoutDashboard, Lock, Menu, Minus, Pencil, Plus, Search, Settings, Shield, Star, Sun, Moon, Swords, Trash2, Trophy, Unlock, X } from 'lucide-react'
@@ -203,6 +203,9 @@ const initialNovember2026StageRotations: Record<string, string[]> = {
 }
 const storageKey = 'compass-rank-tracker-v1'
 const recordDraftStorageKey = `${storageKey}-record-draft`
+// デモ専用データは通常アカウントの保存領域と分離します。
+const demoStorageKey = `${storageKey}-demo-v1`
+const demoRecordDraftStorageKey = `${storageKey}-demo-record-draft`
 const nowLocalInput = () => {
   const now = new Date()
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
@@ -229,9 +232,9 @@ type RecordDraft = {
   form?: Record<string, any>
   selectedHeroDetailName?: string
 }
-function loadRecordDraft(): RecordDraft | null {
+function loadRecordDraft(key = recordDraftStorageKey): RecordDraft | null {
   try {
-    const raw = localStorage.getItem(recordDraftStorageKey)
+    const raw = localStorage.getItem(key)
     if (!raw) return null
     const parsed = JSON.parse(raw) as RecordDraft
     return parsed && typeof parsed === 'object' ? parsed : null
@@ -380,6 +383,75 @@ function loadStore(): Store {
   } catch { /* 壊れたローカルデータは初期値で開始 */ }
   return freshStore()
 }
+
+// 紹介用デモには架空の戦績を表示します。Supabaseや通常アカウントには保存しません。
+function createDemoStore(): Store {
+  const base = freshStore()
+  const demoHeroNames = [
+    'リリカ', 'ソーン=ユーリエフ', 'Voidoll', 'リリカ', '初音ミク', 'ポロロッチョ',
+    'Voidoll', 'リリカ', 'ソーン=ユーリエフ', '初音ミク', 'リリカ', 'ポロロッチョ',
+    'ソーン=ユーリエフ', 'Voidoll', 'リリカ', '初音ミク', 'ポロロッチョ', 'リリカ'
+  ]
+  const resultCycle: Result[] = [
+    'win', 'loss', 'win', 'win', 'loss', 'draw', 'win', 'loss', 'win',
+    'win', 'loss', 'win', 'draw', 'win', 'loss', 'win', 'win', 'loss'
+  ]
+  const matches: Match[] = demoHeroNames.map((heroName, index) => {
+    const played = new Date()
+    played.setDate(played.getDate() - Math.floor(index / 2))
+    played.setHours(22 - (index % 2) - Math.floor(index / 4), index % 2 ? 30 : 0, 0, 0)
+    const playedAt = new Date(played.getTime() - played.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+    const hero = initialHeroes.find(item => item.name === heroName)
+    const result = resultCycle[index % resultCycle.length]
+    const mode: Mode = index % 5 === 4 ? 'フリバ' : 'バトアリ'
+    const rankChange = mode === 'バトアリ' ? (result === 'win' ? 20 : result === 'loss' ? -20 : 0) : null
+    return {
+      id: `demo-match-${index + 1}`,
+      playedAt,
+      season: mode === 'バトアリ' ? seasonLabelFromDate(playedAt) : '',
+      heroName,
+      heroRole: hero?.role ?? 'アタッカー',
+      mapName: initialMaps[(index * 3) % initialMaps.length],
+      result,
+      rankPoints: null,
+      memo: '',
+      rankChange,
+      mode,
+      rankBeforeTier: 5,
+      rankBeforePoints: 240,
+      rankAfterTier: 5,
+      rankAfterPoints: 240 + (rankChange ?? 0)
+    }
+  })
+  const widgets = defaultDashboardWidgets.map(widget => {
+    if (widget.id === 'hero-info') return { ...widget, heroName: 'リリカ' }
+    if (widget.id === 'personal-note') return { ...widget, body: '○○までに○○使いを目指す' }
+    return { ...widget }
+  })
+  return normalizeStore({
+    ...base,
+    matches,
+    initialRankPoints: 2240,
+    currentRankTier: 5,
+    currentRankPoints: 240,
+    activeSeason: seasonLabelFromDate(nowLocalInput()),
+    heroBaseStats: {
+      'リリカ': { battles: 180, wins: 96 },
+      'ソーン=ユーリエフ': { battles: 95, wins: 48 },
+      'Voidoll': { battles: 72, wins: 39 },
+      '初音ミク': { battles: 55, wins: 31 }
+    },
+    dashboardWidgets: widgets
+  })
+}
+
+function loadDemoStore(): Store {
+  try {
+    const raw = localStorage.getItem(demoStorageKey)
+    if (raw) return normalizeStore(JSON.parse(raw) as Partial<Store>)
+  } catch { /* デモ用データが壊れている場合はサンプルを再作成 */ }
+  return createDemoStore()
+}
 function resultLabel(result: Result) { return result === 'win' ? '勝ち' : result === 'loss' ? '負け' : '引き分け' }
 function percent(n: number, d: number) { return d ? `${Math.round(n / d * 100)}%` : '—' }
 function formatDateTime(value: string) {
@@ -436,11 +508,12 @@ function extractRotationCandidates(text: string, monthKey: string, mapNames: str
   return candidates
 }
 
-function TrackerApp() {
+function TrackerApp({ demoMode = false }: { demoMode?: boolean } = {}) {
   const cloud = useContext(CloudContext)
-  const [store, setStore] = useState<Store>(loadStore)
+  const activeRecordDraftKey = demoMode ? demoRecordDraftStorageKey : recordDraftStorageKey
+  const [store, setStore] = useState<Store>(() => demoMode ? loadDemoStore() : loadStore())
   const storeRef = useRef(store)
-  const savedDraft = useMemo(() => loadRecordDraft(), [])
+  const savedDraft = useMemo(() => loadRecordDraft(activeRecordDraftKey), [activeRecordDraftKey])
   const [rankTierDraft, setRankTierDraft] = useState(savedDraft?.rankTierDraft ?? String(store.currentRankTier ?? 1))
   const [rankPointsDraft, setRankPointsDraft] = useState(savedDraft?.rankPointsDraft ?? String(store.currentRankPoints ?? 0))
   const [page, setPage] = useState<Page>(() =>
@@ -510,17 +583,20 @@ function TrackerApp() {
   const rotationImageRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { storeRef.current = store }, [store])
-  useEffect(() => { localStorage.setItem(storageKey, JSON.stringify(store)); cloud?.saveCloudStore(store) }, [store])
+  useEffect(() => {
+    try { localStorage.setItem(demoMode ? demoStorageKey : storageKey, JSON.stringify(store)) } catch { /* 保存領域が利用できない場合は省略 */ }
+    if (!demoMode) cloud?.saveCloudStore(store)
+  }, [store])
   useEffect(() => {
     if (page !== 'dashboard') { setDashboardEditMode(false); setDashboardAddMenuOpen(false) }
   }, [page])
   useEffect(() => {
     try {
-      localStorage.setItem(recordDraftStorageKey, JSON.stringify({
+      localStorage.setItem(activeRecordDraftKey, JSON.stringify({
         page, form, editingId, recordSlide, lockAlly1, lockAlly2, rankTierDraft, rankPointsDraft, selectedHeroDetailName
       }))
     } catch { /* localStorage が利用できない環境では下書き保存を省略 */ }
-  }, [page, form, editingId, recordSlide, lockAlly1, lockAlly2, rankTierDraft, rankPointsDraft, selectedHeroDetailName])
+  }, [page, form, editingId, recordSlide, lockAlly1, lockAlly2, rankTierDraft, rankPointsDraft, selectedHeroDetailName, activeRecordDraftKey])
   useEffect(() => {
     const checkAutomaticSeasonReset = () => {
       const current = storeRef.current
@@ -1030,7 +1106,7 @@ ${result.data.text ?? ''}`)
     const currentItems = store.dashboardWidgets ?? defaultDashboardWidgets
     const repeatedCount = currentItems.filter(widget => widget.type === type).length
     if (repeatableDashboardWidgetTypes.includes(type) && repeatedCount >= 3) {
-      notify(type === 'heroInfo' ? '指定ヒーロー情報は最大3体まで登録できます。' : '自由記載は最大3件まで登録できます。')
+      notify(type === 'heroInfo' ? 'ヒーローの情報は最大3体まで登録できます。' : 'メモ等は最大3件まで登録できます。')
       return
     }
     if (!repeatableDashboardWidgetTypes.includes(type) && currentItems.some(widget => widget.type === type)) return
@@ -1197,8 +1273,8 @@ ${result.data.text ?? ''}`)
     { type: 'winRate', label: '勝率', description: '今日・今月・全体を切り替え', size: '横1' },
     { type: 'streak', label: '連勝数', description: '現在の連勝・連敗と最高連勝', size: '横1' },
     { type: 'popularHero', label: '使用率の高いヒーロー', description: '今日・今月・全体を切り替え', size: '横1' },
-    { type: 'heroInfo', label: '指定ヒーローの情報', description: '最大3体を横スライド。ホーム上で検索・変更可能', size: '横2' },
-    { type: 'note', label: '自由記載', description: '最大3件を横スライド。ホーム上で編集可能', size: '横2' },
+    { type: 'heroInfo', label: 'ヒーローの情報', description: '1件は横1。2件以上は横スライドで表示。ホーム上で変更可能', size: '横1／複数時は横2' },
+    { type: 'note', label: 'メモ等', description: '1件は横1。2件以上は横スライドで表示。ホーム上で編集可能', size: '横1／複数時は横2' },
     { type: 'monthly', label: '月別成績', description: '今月から直近6か月をスライド表示', size: '横1' },
     { type: 'recentMatches', label: '直近の試合履歴', description: '最新5試合。横2・縦2', size: '横2・縦2' }
   ]
@@ -1247,9 +1323,9 @@ ${result.data.text ?? ''}`)
             <button type="button" className="primary-button" onClick={() => { setDashboardEditMode(false); setDashboardAddMenuOpen(false) }}><Check size={15}/> 完了</button>
           </div>
           {dashboardAddMenuOpen && <div className="dashboard-add-panel">
-            <div className="dashboard-add-panel-heading"><strong>ホームに追加する項目</strong><span>ヒーロー情報・自由記載は各3件まで</span></div>
+            <div className="dashboard-add-panel-heading"><strong>ホームに追加する項目</strong><span>ヒーローの情報・メモ等は各3件まで</span></div>
             <div className="dashboard-add-panel-grid">{availableWidgetCatalog.map(item => <button type="button" className="dashboard-add-option" key={item.type} onClick={() => addDashboardWidget(item.type)}><span><strong>{item.label}</strong><small>{item.description}</small></span><Plus size={17}/></button>)}
-              {availableWidgetCatalog.length === 0 && <p className="dashboard-add-panel-empty">追加できる項目はありません。ヒーロー情報と自由記載は最大3件まで登録できます。</p>}
+              {availableWidgetCatalog.length === 0 && <p className="dashboard-add-panel-empty">追加できる項目はありません。ヒーローの情報とメモ等は最大3件まで登録できます。</p>}
             </div>
           </div>}
         </div>}
@@ -1258,15 +1334,22 @@ ${result.data.text ?? ''}`)
             const widget = group[0]
             const repeatableGroup = repeatableDashboardWidgetTypes.includes(widget.type)
             const key = repeatableGroup ? `widget-group-${widget.type}` : widget.id
-            const wide = widget.type === 'heroInfo' || widget.type === 'note' || widget.type === 'recentMatches'
+            const wide = (repeatableGroup && group.length > 1) || widget.type === 'recentMatches'
             const tall = widget.type === 'recentMatches'
-            return <div key={key} data-dashboard-widget-id={widget.id} className={`dashboard-widget-sortable ${wide ? 'is-wide' : ''} ${tall ? 'is-tall' : ''} ${dashboardDraggingId === widget.id ? 'is-dragging' : ''} ${dashboardDropTargetId === widget.id ? 'is-drop-target' : ''}`}>
-              <DashboardWidgetCard widget={widget} carouselWidgets={group} store={store} currentRankState={currentRankState}
-                sortedMatches={sortedMatches} monthlyStats={monthlyStats} editMode={dashboardEditMode}
-                onUpdate={updateDashboardWidget} onRemove={removeDashboardWidget} onOpenHistory={() => setPage('history')}
-                onDragStart={handleDashboardDragStart} onDragMove={handleDashboardDragMove} onDragEnd={handleDashboardDragEnd} onDragCancel={handleDashboardDragCancel}
-              />
-            </div>
+            return <Fragment key={key}>
+              <div data-dashboard-widget-id={widget.id} className={`dashboard-widget-sortable ${wide ? 'is-wide' : ''} ${tall ? 'is-tall' : ''} ${dashboardDraggingId === widget.id ? 'is-dragging' : ''} ${dashboardDropTargetId === widget.id ? 'is-drop-target' : ''}`}>
+                <DashboardWidgetCard widget={widget} carouselWidgets={group} store={store} currentRankState={currentRankState}
+                  sortedMatches={sortedMatches} monthlyStats={monthlyStats} editMode={dashboardEditMode}
+                  onUpdate={updateDashboardWidget} onRemove={removeDashboardWidget} onOpenHistory={() => setPage('history')}
+                  onDragStart={handleDashboardDragStart} onDragMove={handleDashboardDragMove} onDragEnd={handleDashboardDragEnd} onDragCancel={handleDashboardDragCancel}
+                />
+              </div>
+              {repeatableGroup && group.length === 1 && <div className="dashboard-widget-add-tile">
+                <button type="button" aria-label={widget.type === 'heroInfo' ? 'ヒーローの情報を追加' : 'メモ等を追加'} onClick={() => addDashboardWidget(widget.type)}>
+                  <Plus size={23}/><span>追加</span>
+                </button>
+              </div>}
+            </Fragment>
           })}
           {dashboardWidgetGroups.length === 0 && <div className="dashboard-empty-layout"><LayoutDashboard size={28}/><strong>ホーム画面が空です</strong><span>編集モードの「項目を追加」から表示したい項目を追加できます。</span></div>}
         </div>
@@ -1505,7 +1588,7 @@ ${result.data.text ?? ''}`)
                     {widget.type === 'note' && <div className="editor-widget-settings note-editor-settings">
                       <label className="editor-heading-toggle"><input type="checkbox" checked={Boolean(widget.showHeading)} onChange={event => updateDashboardWidget(widget.id, { showHeading: event.target.checked })}/> 見出しを追加</label>
                       {widget.showHeading && <input value={widget.heading ?? ''} maxLength={80} placeholder="例：今月の目標" onChange={event => updateDashboardWidget(widget.id, { heading: event.target.value })}/>}
-                      <textarea rows={3} maxLength={3000} value={widget.body ?? ''} placeholder="自由に記載できます。例：11月中にリリカ使いを達成する" onChange={event => updateDashboardWidget(widget.id, { body: event.target.value })}/>
+                      <textarea rows={3} maxLength={3000} value={widget.body ?? ''} placeholder="例：○○までに○○使いを達成する" onChange={event => updateDashboardWidget(widget.id, { body: event.target.value })}/>
                     </div>}
                   </article>
                 })}
@@ -1519,7 +1602,7 @@ ${result.data.text ?? ''}`)
                   <div><strong>{item.label}</strong><span>{item.description}</span><small>{item.size}</small></div>
                   <button type="button" className="secondary-button" onClick={() => addDashboardWidget(item.type)}><Plus size={15}/> 追加</button>
                 </div>)}
-                {widgetCatalog.every(item => !repeatableDashboardWidgetTypes.includes(item.type) && (store.dashboardWidgets ?? []).some(widget => widget.type === item.type)) && <p className="editor-library-complete">追加できる標準項目はすべて配置済みです。ヒーロー情報と自由記載は複数追加できます。</p>}
+                {widgetCatalog.every(item => !repeatableDashboardWidgetTypes.includes(item.type) && (store.dashboardWidgets ?? []).some(widget => widget.type === item.type)) && <p className="editor-library-complete">追加できる標準項目はすべて配置済みです。ヒーローの情報とメモ等は複数追加できます。</p>}
               </div>
             </section>
           </div> : <div className="dashboard-editor-content menu-editor-content">
@@ -1613,7 +1696,7 @@ function DashboardWidgetCard({ widget, carouselWidgets, store, currentRankState,
   useEffect(() => { setSlideIndex(index => Math.min(index, Math.max(0, slides.length - 1))) }, [slides.length])
   const currentSlide = slides[slideIndex] ?? widget
   useEffect(() => { setNoteEditing(false) }, [currentSlide.id])
-  const wide = widget.type === 'heroInfo' || widget.type === 'note' || widget.type === 'recentMatches'
+  const wide = ((widget.type === 'heroInfo' || widget.type === 'note') && slides.length > 1) || widget.type === 'recentMatches'
   const tall = widget.type === 'recentMatches'
   const period = widget.period ?? (widget.type === 'popularHero' ? 'all' : 'today')
   const periodMatches = period === 'today'
@@ -1709,7 +1792,7 @@ function DashboardWidgetCard({ widget, carouselWidgets, store, currentRankState,
       </div>
     </>}
     {widget.type === 'heroInfo' && <>
-      <div className="dashboard-widget-heading hero-info-heading"><div><span className="widget-kicker">HERO PROFILE</span><h3>指定ヒーローの情報</h3></div>{hero && <span className="hero-role-chip">{hero.role}</span>}</div>
+      <div className="dashboard-widget-heading hero-info-heading"><div><span className="widget-kicker">HERO PROFILE</span><h3>ヒーローの情報</h3></div>{hero && <span className="hero-role-chip">{hero.role}</span>}</div>
       <div className="hero-info-selector-row"><label>ヒーローを検索・選択</label><SearchableHeroDropdown value={currentSlide.heroName ?? ''} heroes={orderedHeroOptions} onChange={name => onUpdate(currentSlide.id, { heroName: name })} placeholder="ヒーロー名で検索"/></div>
       {hero ? <>
         <div className="hero-info-selected-name">{hero.name}</div>
@@ -1718,17 +1801,17 @@ function DashboardWidgetCard({ widget, carouselWidgets, store, currentRankState,
           {heroBattles >= 10000 ? <small>万戦称号を達成しています。</small> : heroBattles >= 5000 ? <small>万戦{hero.name}使いまであと{remaining.toLocaleString()}戦</small> : heroBattles >= 1000 ? <small>殿堂入りまであと{remaining.toLocaleString()}戦 · 万戦まであと{(10000 - heroBattles).toLocaleString()}戦</small> : <small>1,000回使用で「{hero.name}使い」を獲得</small>}
         </div>
       </> : <p className="dashboard-widget-empty">上の検索欄から表示するヒーローを選択してください。</p>}
-      {canCarousel && <div className="widget-carousel-controls"><div className="widget-carousel-dots">{slides.map((item, index) => <button type="button" key={item.id} className={slideIndex === index ? 'active' : ''} aria-label={`${index + 1}体目を表示`} onClick={() => setSlideIndex(index)}/>)}</div><div className="widget-carousel-arrows"><button type="button" aria-label="前のヒーロー" onClick={() => changeSlide(-1)}><ChevronLeft size={16}/></button><span>{slideIndex + 1} / {slides.length}</span><button type="button" aria-label="次のヒーロー" onClick={() => changeSlide(1)}><ChevronRight size={16}/></button></div></div>}
+      {canCarousel && <div className="widget-carousel-controls"><div className="widget-carousel-dots">{slides.map((item, index) => <button type="button" key={item.id} className={slideIndex === index ? 'active' : ''} aria-label={`${index + 1}体目を表示`} onClick={() => setSlideIndex(index)}/>)}</div><div className="widget-carousel-arrows"><button type="button" aria-label="前のヒーロー" onClick={() => changeSlide(-1)}><ChevronLeft size={16}/></button><span>{slideIndex + 1} / {slides.length}</span><button type="button" aria-label="次のヒーロー" onClick={() => changeSlide(1)}><ChevronRight size={16}/></button><button type="button" className="icon-button widget-carousel-remove" aria-label="表示中のヒーロー情報を削除" title="このヒーロー情報を削除" onClick={() => onRemove?.(currentSlide.id)}><Trash2 size={14}/></button></div></div>}
     </>}
     {widget.type === 'note' && <>
-      <div className="dashboard-widget-heading note-widget-header"><div><span className="widget-kicker">PERSONAL NOTE</span><h3>{currentSlide.showHeading && currentSlide.heading?.trim() ? currentSlide.heading : '自由記載'}</h3></div><button type="button" className="icon-button note-edit-trigger" aria-label="自由記載を編集" title="内容を編集" onClick={() => setNoteEditing(current => !current)}><Pencil size={15}/></button></div>
+      <div className="dashboard-widget-heading note-widget-header"><div>{currentSlide.showHeading && currentSlide.heading?.trim() ? <h3>{currentSlide.heading}</h3> : null}</div><button type="button" className="icon-button note-edit-trigger" aria-label="メモを編集" title="内容を編集" onClick={() => setNoteEditing(current => !current)}><Pencil size={15}/></button></div>
       {noteEditing ? <div className="note-home-editor">
         <label className="editor-heading-toggle"><input type="checkbox" checked={Boolean(currentSlide.showHeading)} onChange={event => onUpdate(currentSlide.id, { showHeading: event.target.checked })}/> 見出しを追加</label>
         {currentSlide.showHeading && <input value={currentSlide.heading ?? ''} maxLength={80} placeholder="例：今月の目標" onChange={event => onUpdate(currentSlide.id, { heading: event.target.value })}/>}
-        <textarea rows={4} maxLength={3000} value={currentSlide.body ?? ''} placeholder="自由に記載できます。例：11月中にリリカ使いを達成する" onChange={event => onUpdate(currentSlide.id, { body: event.target.value })}/>
+        <textarea rows={4} maxLength={3000} value={currentSlide.body ?? ''} placeholder="例：○○までに○○使いを達成する" onChange={event => onUpdate(currentSlide.id, { body: event.target.value })}/>
         <button type="button" className="secondary-button note-editor-done" onClick={() => setNoteEditing(false)}>編集を閉じる</button>
       </div> : <p className={`note-widget-body ${currentSlide.body?.trim() ? '' : 'is-empty'}`}>{currentSlide.body?.trim() || '編集ボタンから目標やメモを入力できます。'}</p>}
-      {canCarousel && <div className="widget-carousel-controls"><div className="widget-carousel-dots">{slides.map((item, index) => <button type="button" key={item.id} className={slideIndex === index ? 'active' : ''} aria-label={`${index + 1}件目を表示`} onClick={() => setSlideIndex(index)}/>)}</div><div className="widget-carousel-arrows"><button type="button" aria-label="前の自由記載" onClick={() => changeSlide(-1)}><ChevronLeft size={16}/></button><span>{slideIndex + 1} / {slides.length}</span><button type="button" aria-label="次の自由記載" onClick={() => changeSlide(1)}><ChevronRight size={16}/></button></div></div>}
+      {canCarousel && <div className="widget-carousel-controls"><div className="widget-carousel-dots">{slides.map((item, index) => <button type="button" key={item.id} className={slideIndex === index ? 'active' : ''} aria-label={`${index + 1}件目を表示`} onClick={() => setSlideIndex(index)}/>)}</div><div className="widget-carousel-arrows"><button type="button" aria-label="前のメモ" onClick={() => changeSlide(-1)}><ChevronLeft size={16}/></button><span>{slideIndex + 1} / {slides.length}</span><button type="button" aria-label="次のメモ" onClick={() => changeSlide(1)}><ChevronRight size={16}/></button><button type="button" className="icon-button widget-carousel-remove" aria-label="表示中のメモを削除" title="このメモを削除" onClick={() => onRemove?.(currentSlide.id)}><Trash2 size={14}/></button></div></div>}
     </>}
     {widget.type === 'monthly' && <>
       <div className="dashboard-widget-heading"><div><span className="widget-kicker">MONTHLY RECORD</span><h3>月別成績</h3></div><span className="dashboard-widget-icon"><CalendarDays size={18}/></span></div>
@@ -1794,6 +1877,7 @@ export default function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [mode, setMode] = useState<'login' | 'signup'>('login')
+  const [demoMode, setDemoMode] = useState(false)
   const [message, setMessage] = useState('')
   const [syncStatus, setSyncStatus] = useState('準備中')
   const timer = useRef<number | undefined>(undefined)
@@ -1844,6 +1928,12 @@ export default function App() {
 
   async function submitAuth(e: React.FormEvent) {
     e.preventDefault(); setMessage('')
+    // dummyログインはSupabase認証ではなく、分離された端末内デモだけを開きます。
+    if (mode === 'login' && email.trim().toLowerCase() === 'dummy' && password === '01100011') {
+      setDemoMode(true)
+      setMessage('')
+      return
+    }
     if (!supabase) return
     const result = mode === 'signup'
       ? await supabase.auth.signUp({ email: email.trim(), password })
@@ -1853,8 +1943,9 @@ export default function App() {
     else setMessage('ログインしました。クラウドデータを読み込んでいます。')
   }
 
+  if (demoMode) return <><div className="cloud-user-bar demo-user-bar">{themeToggle}<span>デモモード · サンプルデータはこの端末内だけに保存されます</span><button type="button" onClick={() => setDemoMode(false)}>デモを終了</button></div><TrackerApp demoMode /></>
   if (!supabase) return <div className="auth-shell">{themeToggle}<div className="auth-card"><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><h1>クラウド同期の設定</h1><p>Supabase の接続情報がまだ設定されていません。公開設定後に、このアプリを利用できるようになります。</p><ol><li>Supabase プロジェクトを作成</li><li>SQL Editor で <code>supabase/migrations/001_initial_schema.sql</code> を実行</li><li>プロジェクトの URL と Publishable key をホスティング設定に登録</li></ol><p className="small-note">この設定画面は、接続情報を入力する前の状態です。</p></div></div>
-  if (!user) return <div className="auth-shell">{themeToggle}<form className="auth-card" onSubmit={submitAuth}><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><div className="eyebrow">RANK TRACKER CLOUD</div><h1>コンパス戦績ノート</h1><p>アカウントでログインすると、PC とスマホで記録を共有できます。</p><div className="field"><label>メールアドレス</label><input type="email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} /></div><div className="field"><label>パスワード（6文字以上）</label><input type="password" required minLength={6} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} /></div><button className="primary-button auth-submit" type="submit">{mode === 'login' ? 'ログイン' : 'アカウントを作成'}</button><button className="text-button auth-switch" type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>{mode === 'login' ? '初めて使う方：アカウント作成' : 'すでにアカウントをお持ちの方：ログイン'}</button>{message && <p className="auth-message">{message}</p>}</form></div>
+  if (!user) return <div className="auth-shell">{themeToggle}<form className="auth-card" onSubmit={submitAuth}><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><div className="eyebrow">RANK TRACKER CLOUD</div><h1>コンパス戦績ノート</h1><p>アカウントでログインすると、PC とスマホで記録を共有できます。</p><div className="field"><label>メールアドレス</label><input type="text" inputMode="email" required autoComplete="email" placeholder="メールアドレスまたは dummy" value={email} onChange={e => setEmail(e.target.value)} /></div><div className="field"><label>パスワード（6文字以上）</label><input type="password" required minLength={6} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} /></div><button className="primary-button auth-submit" type="submit">{mode === 'login' ? 'ログイン' : 'アカウントを作成'}</button><button className="text-button auth-switch" type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>{mode === 'login' ? '初めて使う方：アカウント作成' : 'すでにアカウントをお持ちの方：ログイン'}</button>{message && <p className="auth-message">{message}</p>}</form></div>
   if (!ready) return <div className="auth-shell">{themeToggle}<div className="auth-card"><div className="brand-mark"><img className="brand-mark-image" src={compassNoteMark} alt="" /></div><h1>クラウドデータを準備中</h1><p>{syncStatus}。しばらくお待ちください。</p>{message && <p className="auth-message">{message}</p>}<button className="secondary-button" onClick={() => supabase.auth.signOut()}>ログアウト</button></div></div>
   return <CloudContext.Provider value={{ saveCloudStore, syncStatus }}><><div className="cloud-user-bar">{themeToggle}<span className="cloud-login-status">ログイン中 · 同期：{syncStatus}</span><button className="logout-button" onClick={() => supabase.auth.signOut()}>ログアウト</button></div><TrackerApp /></></CloudContext.Provider>
 }
